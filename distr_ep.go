@@ -12,6 +12,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	DEFAULT_LOCK_TTL    = time.Millisecond * 1000
+	DEFAULT_CLEANUP_DUR = time.Second * 10
+)
+
 type DistributedEventProcessor struct {
 	// namespace
 	Namespace string
@@ -20,8 +25,9 @@ type DistributedEventProcessor struct {
 	// TTL for lock
 	LockTTL time.Duration
 	// cleanup delay
-	CleanupDur int
-	Callback   EventCallback
+	CleanupDur time.Duration
+	// Event callback
+	Callback EventCallback
 
 	// Key stream
 	keyStream string
@@ -34,20 +40,16 @@ type DistributedEventProcessor struct {
 	consumerId string
 	// Locker
 	locker *redislock.Client
+	// is initialized
+	initialized bool
 }
 
 func (d *DistributedEventProcessor) Init() error {
 	// Init all the resources
-	if len(d.Namespace) == 0 {
-		return errors.New("Namespace is required")
+	if err := d.validate(); err != nil {
+		log.Warnf("Validation failed %s", err)
+		return err
 	}
-	d.locker = redislock.New(d.RedisClient)
-	d.keyStream = fmt.Sprintf("%s:k-str", d.Namespace)
-	d.groupName = fmt.Sprintf("%s-cg", d.Namespace)
-	d.monitorZset = fmt.Sprintf("%s:mon-set", d.Namespace)
-	d.monitorLockName = fmt.Sprintf("%s:mon-set:lk", d.Namespace)
-	d.consumerId = xid.New().String()
-
 	// Context
 	ctx := context.Background()
 	// Create consumer group, key stream
@@ -71,10 +73,40 @@ func (d *DistributedEventProcessor) Init() error {
 	go d.keyStreamConsumer()
 	// Start the clean-up goroutine
 	go d.monitorKeys()
+	d.initialized = true
+	return nil
+}
+
+func (d *DistributedEventProcessor) validate() error {
+	// Init all the resources
+	if len(d.Namespace) == 0 {
+		return errors.New("Namespace is required")
+	}
+	if d.Callback == nil {
+		return errors.New("Callback is required")
+	}
+	if d.RedisClient == nil {
+		return errors.New("Missign redis client")
+	}
+	if d.LockTTL == 0 {
+		d.LockTTL = DEFAULT_LOCK_TTL
+	}
+	if d.CleanupDur == 0 {
+		d.CleanupDur = DEFAULT_CLEANUP_DUR
+	}
+	d.locker = redislock.New(d.RedisClient)
+	d.keyStream = fmt.Sprintf("%s:k-str", d.Namespace)
+	d.groupName = fmt.Sprintf("%s-cg", d.Namespace)
+	d.monitorZset = fmt.Sprintf("%s:mon-set", d.Namespace)
+	d.monitorLockName = fmt.Sprintf("%s:mon-set:lk", d.Namespace)
+	d.consumerId = xid.New().String()
 	return nil
 }
 
 func (d *DistributedEventProcessor) AddEvent(key string, val interface{}) error {
+	if !d.initialized {
+		return errors.New("Event Processor is not initialized")
+	}
 	// Add the element to key-stream
 	a := &redis.XAddArgs{
 		Stream: d.keyStream,
