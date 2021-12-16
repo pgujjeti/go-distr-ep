@@ -19,8 +19,14 @@ func (d *DistributedEventProcessor) keyEventHandler(key string) {
 	}
 	// Defer lock release
 	defer lock.Release(ctx)
-	// Start consuming messages from the {NS}:events:{key} stream
+	// Start consuming messages from the {NS}:evt-str:{key} stream
 	sn := d.streamNameForKey(key)
+	// no easy way to check if group exists
+	if err := d.RedisClient.XGroupCreate(ctx, sn, d.groupName, "$").Err(); err == nil {
+		log.Infof("Created consumer group %s", d.groupName)
+	} else {
+		log.Debugf("Create consumer group %s returned error: %s", d.groupName, err)
+	}
 	for {
 		rga := &redis.XReadGroupArgs{
 			Group:    d.groupName,
