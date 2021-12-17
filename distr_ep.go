@@ -113,6 +113,6 @@ func (d *DistributedEventProcessor) AddEvent(key string, val interface{}) error 
 		Values: map[string]interface{}{"key": key, "val": val},
 	}
 	r, err := d.RedisClient.XAdd(context.Background(), a).Result()
-	log.Debugf("Added event to %s: %v, %s", d.keyStream, r, err)
+	log.Debugf("Added event to %s: %v, %v", d.keyStream, r, err)
 	return err
 }

@@ -11,10 +11,10 @@ import (
 )
 
 func (d *DistributedEventProcessor) monitorKeys() {
-	cdur := time.Duration(d.CleanupDur) * time.Second
+	cdur := d.CleanupDur
 	for {
 		time.Sleep(cdur)
-		log.Debug("Running cleanup ...")
+		log.Debug("consumer %s : running cleanup ...", d.consumerId)
 		d.runKeyMonitor(cdur / 2)
 	}
 }
@@ -25,13 +25,15 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 	lock, err := d.locker.Obtain(ctx, d.monitorLockName, dur, nil)
 	// Lock not acquired? return
 	if err == redislock.ErrNotObtained {
+		log.Debugf("consumer %s : could not obtain monitor lock", d.consumerId)
 		return
 	}
-	// TODO - limit the run of cleanup to the lock expiration
+	// TODO - limit the duration of cleanup to be under the lock expiration
 	defer lock.Release(ctx)
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
+	log.Infof("consumer %s : checking for keys before %s", d.consumerId, c_time_str)
 	zrb := &redis.ZRangeBy{
 		Max: c_time_str,
 	}
@@ -42,9 +44,9 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 	for _, rz := range ra {
 		key := rz.Member.(string)
 		log.Debugf("checking key %s with expiry %s", key, rz.Score)
-		// Check the key-stream unprocessed size
+		// Check the key-stream for unprocessed/in-process msgs
 		unprocessed_msg := d.unprocessedMessages(ctx, key)
-		if unprocessed_msg > 0 {
+		if unprocessed_msg {
 			// Increment the time frame -> current-time + next-check
 			d.refreshKeyMonitorExpiry(ctx, key)
 			// Spin off the std event handler as a go-routine
@@ -60,26 +62,23 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 }
 
 func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
-	key string) int {
+	key string) bool {
 	xis, err := d.RedisClient.XInfoStreamFull(ctx, d.streamNameForKey(key), 1).Result()
 	if err != nil {
 		// TODO error handling
-		return 0
+		return false
 	}
-	var xg *redis.XInfoStreamGroup
-	for _, xgl := range xis.Groups {
+	for _, xg := range xis.Groups {
 		if xg.Name == d.groupName {
 			// Found the group
-			xg = &xgl
+			if xis.LastGeneratedID != xg.LastDeliveredID || xg.PelCount > 0 {
+				// group's last delivered id is lagging or group's pending count > 0
+				return true
+			}
 			break
 		}
 	}
-	if xg != nil &&
-		(xis.LastGeneratedID != xg.LastDeliveredID || xg.PelCount > 0) {
-		// group's last delivered id is lagging or group's pending count > 0
-		return 1
-	}
-	return 0
+	return false
 }
 
 func (d *DistributedEventProcessor) refreshKeyMonitorExpiry(ctx context.Context,

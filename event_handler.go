@@ -38,7 +38,7 @@ func (d *DistributedEventProcessor) keyEventHandler(key string) {
 		}
 		xs, err := d.RedisClient.XReadGroup(ctx, rga).Result()
 		if err != nil || len(xs) == 0 || len(xs[0].Messages) == 0 {
-			log.Debugf("%s : no more messages to process", key)
+			log.Infof("%s : no more messages to process", key)
 			break
 		}
 		for _, msg := range xs[0].Messages {
