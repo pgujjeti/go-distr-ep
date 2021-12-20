@@ -15,6 +15,7 @@ func (d *DistributedEventProcessor) keyEventHandler(key string) {
 		d.LockTTL, nil)
 	// If lock cant be obtained, return
 	if err == redislock.ErrNotObtained {
+		log.Debugf("Client %s couldnt obtain lock for key %s, exiting...", d.consumerId, key)
 		return
 	}
 	// Defer lock release
