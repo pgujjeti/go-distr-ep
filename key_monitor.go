@@ -17,7 +17,7 @@ func (d *DistributedEventProcessor) monitorKeys() {
 		select {
 		case <-ticker.C:
 			log.Debug("consumer %s : running cleanup ...", d.consumerId)
-			d.runKeyMonitor(cdur / 2)
+			d.runKeyMonitor(cdur)
 		}
 	}
 }
