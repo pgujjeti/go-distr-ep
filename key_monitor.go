@@ -12,10 +12,13 @@ import (
 
 func (d *DistributedEventProcessor) monitorKeys() {
 	cdur := d.CleanupDur
+	ticker := time.NewTicker(cdur)
 	for {
-		time.Sleep(cdur)
-		log.Debug("consumer %s : running cleanup ...", d.consumerId)
-		d.runKeyMonitor(cdur / 2)
+		select {
+		case <-ticker.C:
+			log.Debug("consumer %s : running cleanup ...", d.consumerId)
+			d.runKeyMonitor(cdur / 2)
+		}
 	}
 }
 
