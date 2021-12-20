@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v8"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -21,35 +20,27 @@ func (d *DistributedEventProcessor) keyEventHandler(key string) {
 	// Defer lock release
 	defer lock.Release(ctx)
 	// Start consuming messages from the {NS}:evt-str:{key} stream
-	sn := d.streamNameForKey(key)
-	// no easy way to check if group exists
-	if err := d.RedisClient.XGroupCreate(ctx, sn, d.groupName, "$").Err(); err == nil {
-		log.Infof("Created consumer group %s", d.groupName)
-	} else {
-		log.Debugf("Create consumer group %s returned error: %s", d.groupName, err)
-	}
+	ln := d.listNameForKey(key)
 	for {
-		rga := &redis.XReadGroupArgs{
-			Group:    d.groupName,
-			Consumer: d.consumerId,
-			Streams:  []string{sn, ">"},
-			Count:    2,
-			Block:    d.LockTTL / 2,
-			NoAck:    false,
-		}
-		xs, err := d.RedisClient.XReadGroup(ctx, rga).Result()
-		if err != nil || len(xs) == 0 || len(xs[0].Messages) == 0 {
-			log.Infof("%s : no more messages to process", key)
+		len, err := d.RedisClient.LLen(ctx, ln).Result()
+		log.Debugf("%s : %v elements to process in %s: %v", key, len, ln, err)
+		if len == 0 || err != nil {
+			log.Warnf("%s : no more messages to process: %v", key, err)
 			break
 		}
-		for _, msg := range xs[0].Messages {
-			// when message is received, renew lock's TTL (to account for wait time)
-			lock.Refresh(ctx, d.LockTTL, nil)
-			// process message synchronously
-			d.processEvent(key, msg.Values["val"])
-			// mark message as processed
-			d.RedisClient.XAck(ctx, sn, d.groupName, msg.ID)
+		// Seek the first element, without removing. Element is removed at the end of processing
+		msg, err := d.RedisClient.LIndex(ctx, ln, 0).Result()
+		if err != nil {
+			log.Infof("%s : couldnt fetch the first element from %s: %v",
+				key, ln, err)
+			break
 		}
+		// renew lock's TTL
+		lock.Refresh(ctx, d.LockTTL, nil)
+		// process message synchronously
+		d.processEvent(key, msg)
+		// mark message as processed, by popping the first element from the list
+		d.RedisClient.LPop(ctx, ln)
 	}
 }
 

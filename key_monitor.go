@@ -22,6 +22,7 @@ func (d *DistributedEventProcessor) monitorKeys() {
 func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(dur))
 	// TODO - limit the duration of cleanup to be under the lock expiration
+	// validate this logic
 	defer cancel()
 	// Try to acquire monitor lock
 	lock, err := d.locker.Obtain(ctx, d.monitorLockName, dur, nil)
@@ -64,22 +65,15 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 
 func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
 	key string) bool {
-	xis, err := d.RedisClient.XInfoStreamFull(ctx, d.streamNameForKey(key), 1).Result()
+	ln := d.listNameForKey(key)
+	len, err := d.RedisClient.LLen(ctx, ln).Result()
+	log.Tracef("%s : %v unprocessed messages in LIST %s", key, len, ln)
 	if err != nil {
-		// TODO error handling
+		// error handling
+		log.Warnf("%s : couldnt find the length of LIST %s", key, ln)
 		return false
 	}
-	for _, xg := range xis.Groups {
-		if xg.Name == d.groupName {
-			// Found the group
-			if xis.LastGeneratedID != xg.LastDeliveredID || xg.PelCount > 0 {
-				// group's last delivered id is lagging or group's pending count > 0
-				return true
-			}
-			break
-		}
-	}
-	return false
+	return len > 0
 }
 
 func (d *DistributedEventProcessor) refreshKeyMonitorExpiry(ctx context.Context,

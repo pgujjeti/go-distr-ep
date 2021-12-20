@@ -15,6 +15,7 @@ import (
 const (
 	DEFAULT_LOCK_TTL    = time.Millisecond * 1000
 	DEFAULT_CLEANUP_DUR = time.Second * 10
+	DEFAULT_LIST_TTL    = time.Hour * 24
 )
 
 type DistributedEventProcessor struct {
@@ -83,17 +84,18 @@ func (d *DistributedEventProcessor) AddEvent(key string, val interface{}) error 
 	if !d.initialized {
 		return errors.New("Event Processor is not initialized")
 	}
-	// add the event into key-specific {NS}:events:{key} stream
-	a := &redis.XAddArgs{
-		Stream: d.streamNameForKey(key),
-		Values: map[string]interface{}{"val": val},
-	}
+	// add the event into key-specific {NS}:events:{key} entity
 	ctx := context.Background()
-	r, err := d.RedisClient.XAdd(ctx, a).Result()
-	log.Debugf("Added event for processing: %v, %v", r, err)
+	ln := d.listNameForKey(key)
+	// Add new events to the end of the list
+	r, err := d.RedisClient.RPush(ctx, ln, val).Result()
+	log.Debugf("%s : add event for processing result: %v, %v", key, r, err)
 	if err != nil {
+		log.Warnf("%s : could not add event for processing: %v", key, err)
 		return err
 	}
+	// renew List expiry
+	d.RedisClient.Expire(ctx, ln, DEFAULT_LIST_TTL)
 	// add to the monitor ZSET {NS}:k-monitor
 	d.refreshKeyMonitorExpiry(ctx, key)
 	// Kick off the event handler

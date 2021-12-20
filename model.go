@@ -11,8 +11,8 @@ type EventCallback interface {
 	ProcessEvent(key string, val interface{})
 }
 
-func (d *DistributedEventProcessor) streamNameForKey(key string) string {
-	return fmt.Sprintf("%s:evt-str:%s", d.Namespace, key)
+func (d *DistributedEventProcessor) listNameForKey(key string) string {
+	return fmt.Sprintf("%s:evt-ls:%s", d.Namespace, key)
 }
 
 func (d *DistributedEventProcessor) processLockForKey(key string) string {
