@@ -9,9 +9,15 @@ import (
 
 func (d *DistributedEventProcessor) keyEventHandler(key string) {
 	ctx := context.Background()
+	// Retry once with a time limit of 10 ms
+	// This is designed to address a potential race condition where another currently
+	// processing thread might have checked out of the message processing loop and
+	// is about to release the key-lock
+	// TODO - validate this works
+	retry := redislock.LimitRetry(redislock.LinearBackoff(DEFAULT_LOCK_RETRY_DUR), 1)
 	// Obtain EVENT_LOCK to {NS}:proc-lock:{key}, with TTL
 	lock, err := d.locker.Obtain(ctx, d.processLockForKey(key),
-		d.LockTTL, nil)
+		d.LockTTL, &redislock.Options{RetryStrategy: retry})
 	// If lock cant be obtained, return
 	if err == redislock.ErrNotObtained {
 		log.Debugf("Client %s couldnt obtain lock for key %s, exiting...", d.consumerId, key)

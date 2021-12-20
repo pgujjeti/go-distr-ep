@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	DEFAULT_LOCK_TTL    = time.Millisecond * 1000
-	DEFAULT_CLEANUP_DUR = time.Second * 10
-	DEFAULT_LIST_TTL    = time.Hour * 24
+	DEFAULT_LOCK_TTL       = time.Millisecond * 1000
+	DEFAULT_LOCK_RETRY_DUR = time.Millisecond * 10
+	DEFAULT_CLEANUP_DUR    = time.Second * 10
+	DEFAULT_LIST_TTL       = time.Hour * 24
 )
 
 type DistributedEventProcessor struct {
