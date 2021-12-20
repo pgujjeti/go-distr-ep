@@ -20,7 +20,9 @@ func (d *DistributedEventProcessor) monitorKeys() {
 }
 
 func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
-	ctx := context.Background()
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(dur))
+	// TODO - limit the duration of cleanup to be under the lock expiration
+	defer cancel()
 	// Try to acquire monitor lock
 	lock, err := d.locker.Obtain(ctx, d.monitorLockName, dur, nil)
 	// Lock not acquired? return
@@ -28,7 +30,6 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 		log.Debugf("consumer %s : could not obtain monitor lock", d.consumerId)
 		return
 	}
-	// TODO - limit the duration of cleanup to be under the lock expiration
 	defer lock.Release(ctx)
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
@@ -83,7 +84,7 @@ func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
 
 func (d *DistributedEventProcessor) refreshKeyMonitorExpiry(ctx context.Context,
 	key string) {
-	// TODO - adding with an expiry of 2 * LockTTL, check on this logic
+	// TODO - adding with an expiry of 2 * LockTTL, check this logic
 	exp_time := time.Now().Add(d.LockTTL * 2).UnixMilli()
 	d.RedisClient.ZAdd(ctx, d.monitorZset,
 		&redis.Z{Score: float64(exp_time), Member: key})
