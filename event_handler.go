@@ -22,14 +22,21 @@ func (d *DistributedEventProcessor) runEvent(key string, val interface{}) error 
 	}
 	// renew List expiry
 	d.RedisClient.Expire(ctx, ln, DEFAULT_LIST_TTL)
-	// add to the monitor ZSET {NS}:k-monitor
-	d.refreshKeyMonitorExpiry(ctx, key)
-	// Kick off the event handler
-	go d.keyEventHandler(key)
+	d.keyEventHandler(ctx, key)
 	return nil
 }
 
-func (d *DistributedEventProcessor) keyEventHandler(key string) {
+func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key string) {
+	// add to the monitor ZSET {NS}:k-monitor
+	d.refreshKeyMonitorExpiry(ctx, key)
+	// Kick off the event handler as a go-routine
+	go d.runKeyProcessor(key)
+}
+
+// runs a go-routine to process the given key
+// tries to acquire key's lock: if successful, proceeds with processing the messages
+// from the key's LIST
+func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	ctx := context.Background()
 	// Retry once with a time limit of 10 ms
 	// This is designed to address a potential race condition where another currently

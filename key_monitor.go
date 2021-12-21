@@ -52,10 +52,8 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 		// Check the key-stream for unprocessed/in-process msgs
 		unprocessed_msg := d.unprocessedMessages(ctx, key)
 		if unprocessed_msg {
-			// Increment the time frame -> current-time + next-check
-			d.refreshKeyMonitorExpiry(ctx, key)
-			// Spin off the std event handler as a go-routine
-			d.keyEventHandler(key)
+			// Renews the check-TTL and launches the key-processor
+			d.keyEventHandler(ctx, key)
 		} else {
 			log.Debugf("key %s shall be deleted", key)
 			// no pending msgs - key will cleaned up after the run
@@ -81,7 +79,7 @@ func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
 
 func (d *DistributedEventProcessor) refreshKeyMonitorExpiry(ctx context.Context,
 	key string) {
-	// TODO - adding with an expiry of 2 * LockTTL, check this logic
+	// add this key with an expiry of 2 * LockTTL
 	exp_time := time.Now().Add(d.LockTTL * 2).UnixMilli()
 	d.RedisClient.ZAdd(ctx, d.monitorZset,
 		&redis.Z{Score: float64(exp_time), Member: key})
