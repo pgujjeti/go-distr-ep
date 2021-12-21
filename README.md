@@ -1,13 +1,21 @@
 # go-distr-ep
-This project provides a distributed event processor framework for golang. It 
-uses redis for persisting the events and distributing them among the 
-participating nodes.
+This project provides a distributed event processor framework for golang. This 
+framework would be useful for cases where you need to process events 
+sequentially, for a given key.
+
+go-distr-ep uses redis for persisting events (fault-tolerance) and for distributing 
+them among the participating nodes.
 
 ## Features
-- Submit events to be processed
-- Framework guarantees events are processed in order, for a given key
-- Events for a given key are processed sequentially (not concurrently)
+- Events to be processed, for a given key
+- Events are processed in order, for a given key
+- Events for a given key are processed sequentially (i.e. not concurrently)
 - Events can be scheduled to be executed after a delay
+- Events are persisted to redis, for fault-tolerance
+
+## Dependencies
+- go-redis/v8
+- redislock
 
 ## Example
 ```go
