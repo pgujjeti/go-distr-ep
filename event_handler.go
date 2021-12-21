@@ -64,9 +64,16 @@ func (d *DistributedEventProcessor) keyEventHandler(key string) {
 		// renew lock's TTL
 		lock.Refresh(ctx, d.LockTTL, nil)
 		// process message synchronously
+		// FIXME - keep renewing the lock while the element is in process
 		d.processEvent(key, msg)
 		// mark message as processed, by popping the first element from the list
 		d.RedisClient.LPop(ctx, ln)
+		// Check if the lock is active - discontinue, if it is not
+		if ttl, err := lock.TTL(ctx); err != nil || ttl == 0 {
+			// Lock expired!
+			log.Errorf("%s : lock expired while processing message %s", key)
+			break
+		}
 	}
 }
 
