@@ -49,7 +49,7 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 	// Produce events
 	for i := 1; i <= no_msgs; i++ {
 		val := fmt.Sprintf("%s-value-%v", name, i)
-		dep.AddEvent("key1", val)
+		dep.AddEvent("key1", val, time.Second*2)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)
 		}

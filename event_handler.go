@@ -7,6 +7,26 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func (d *DistributedEventProcessor) runEvent(key string, val interface{}) error {
+	// add the event into key-specific {NS}:events:{key} entity
+	ctx := context.Background()
+	ln := d.listNameForKey(key)
+	// Add new events to the end of the list
+	r, err := d.RedisClient.RPush(ctx, ln, val).Result()
+	log.Debugf("%s : add event for processing result: %v, %v", key, r, err)
+	if err != nil {
+		log.Warnf("%s : could not add event for processing: %v", key, err)
+		return err
+	}
+	// renew List expiry
+	d.RedisClient.Expire(ctx, ln, DEFAULT_LIST_TTL)
+	// add to the monitor ZSET {NS}:k-monitor
+	d.refreshKeyMonitorExpiry(ctx, key)
+	// Kick off the event handler
+	go d.keyEventHandler(key)
+	return nil
+}
+
 func (d *DistributedEventProcessor) keyEventHandler(key string) {
 	ctx := context.Background()
 	// Retry once with a time limit of 10 ms

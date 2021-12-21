@@ -28,7 +28,7 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 	// validate this logic
 	defer cancel()
 	// Try to acquire monitor lock
-	lock, err := d.locker.Obtain(ctx, d.monitorLockName, dur, nil)
+	lock, err := d.locker.Obtain(ctx, d.monitorLock, dur, nil)
 	// Lock not acquired? return
 	if err == redislock.ErrNotObtained {
 		log.Debugf("consumer %s : could not obtain monitor lock", d.consumerId)
