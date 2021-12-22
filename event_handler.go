@@ -69,7 +69,12 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 				key, ln, err)
 			break
 		}
-		d.handleListEvent(key, msg, lock, ctx)
+		ejob := &EventProcessorJob{
+			eventProcessor: d,
+			key:            key,
+			val:            msg,
+		}
+		runProtectedJobWithLock(lock, d.LockTTL, ejob)
 		// mark message as processed, by popping the first event from the list
 		d.RedisClient.LPop(ctx, ln)
 		// Lock should be active. Discontinue, if it is not (circuit-breaker)
@@ -81,35 +86,18 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	}
 }
 
-func (d *DistributedEventProcessor) handleListEvent(key string, msg string,
-	lock *redislock.Lock, ctx context.Context) {
-	defer timeExecution(time.Now(), fmt.Sprintf("%s : processing event", key))
-	// renew lock's TTL
-	lock.Refresh(ctx, d.LockTTL, nil)
-	// process message synchronously
-	// keep renewing the lock while the element is in process
-	lock_ticker := time.NewTicker(d.LockTTL / 2)
-	defer lock_ticker.Stop()
-	ch_done := make(chan bool)
-	go d.processEvent(key, msg, ch_done)
-	for {
-		select {
-		case <-lock_ticker.C:
-			log.Debugf("%s : renewing lock for %v", key, d.LockTTL)
-			// renew lock's TTL
-			lock.Refresh(ctx, d.LockTTL, nil)
-		case <-ch_done:
-			// processing done
-			log.Debugf("%s : processed msg: %s", key, msg)
-			lock_ticker.Stop()
-			return
-		}
-	}
+// Wrapper for event processor job - implements ProtectedJobRunner interface
+type EventProcessorJob struct {
+	eventProcessor *DistributedEventProcessor
+	key            string
+	val            string
 }
 
-func (d *DistributedEventProcessor) processEvent(key string,
-	val interface{}, ch chan bool) {
+func (e *EventProcessorJob) runJob(ch chan bool) {
+	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
+	defer timeExecution(time.Now(), fmt.Sprintf("%s:event", e.key))
+	d := e.eventProcessor
 	// Invoke process event callback
-	d.Callback.ProcessEvent(key, val)
+	d.Callback.ProcessEvent(e.key, e.val)
 }
