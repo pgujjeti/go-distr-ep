@@ -109,7 +109,7 @@ func (d *DistributedEventProcessor) handleListEvent(key string, msg string,
 
 func (d *DistributedEventProcessor) processEvent(key string,
 	val interface{}, ch chan bool) {
+	defer channelDone(ch, true)
 	// Invoke process event callback
 	d.Callback.ProcessEvent(key, val)
-	ch <- true
 }
