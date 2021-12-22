@@ -54,6 +54,7 @@ func (d *DistributedEventProcessor) Init() error {
 		log.Warnf("Validation failed %s", err)
 		return err
 	}
+	// TODO handle graceful termination of background go-routines
 	// Start the clean-up goroutine
 	go d.monitorKeys()
 	// Start the scheduler gorouting
