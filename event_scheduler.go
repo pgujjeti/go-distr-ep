@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bsm/redislock"
 	"github.com/go-redis/redis/v8"
 	"github.com/rs/xid"
 	log "github.com/sirupsen/logrus"
@@ -51,49 +50,24 @@ func (d *DistributedEventProcessor) eventScheduler() {
 		select {
 		case <-ticker.C:
 			log.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
-			d.runSchedulerJob(cdur)
+			spj := &SchedulePollJob{eventProcessor: d}
+			runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
 		}
 	}
 }
 
-// TODO - make this reusable code (scheduler, monitor, event-processor)
-func (d *DistributedEventProcessor) runSchedulerJob(dur time.Duration) {
-	defer timeExecution(time.Now(), "scheduler-run")
-	ctx := context.Background()
-	// Try to acquire scheduler lock
-	lock, err := d.locker.Obtain(ctx, d.schedulerLock, dur, nil)
-	// Lock not acquired? return
-	if err == redislock.ErrNotObtained {
-		log.Debugf("consumer %s : could not obtain scheduler lock", d.consumerId)
-		return
-	}
-	defer lock.Release(ctx)
-	// Refresh the lock while the scheduler runs with a ticker
-	// running at 1/2 the lock duration
-	ticker := time.NewTicker(dur / 2)
-	defer ticker.Stop()
-	// channel to indicate when the checkKeys routine is completed
-	ch_done := make(chan bool)
-	go d.pollScheduledEvents(ctx, dur, ch_done)
-	for {
-		select {
-		case <-ticker.C:
-			// renew lock
-			log.Debugf("consumer %s : schedule poller still running", d.consumerId)
-			lock.Refresh(ctx, dur, nil)
-		case <-ch_done:
-			// Job complete
-			ticker.Stop()
-			log.Debugf("consumer %s : schedule poller COMPLETED", d.consumerId)
-			return
-		}
-	}
+// Wrapper for schedule poll job - implements ProtectedJobRunner interface
+type SchedulePollJob struct {
+	eventProcessor *DistributedEventProcessor
 }
 
-func (d *DistributedEventProcessor) pollScheduledEvents(ctx context.Context,
-	dur time.Duration, ch chan bool) {
-	// indicates that polling completed
+func (s *SchedulePollJob) runJob(ch chan bool) {
+	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
+	s.eventProcessor.pollScheduledEvents(context.Background())
+}
+
+func (d *DistributedEventProcessor) pollScheduledEvents(ctx context.Context) {
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bsm/redislock"
 	"github.com/go-redis/redis/v8"
 	log "github.com/sirupsen/logrus"
 )
@@ -17,45 +16,24 @@ func (d *DistributedEventProcessor) monitorKeys() {
 		select {
 		case <-ticker.C:
 			log.Debug("consumer %s : running cleanup ...", d.consumerId)
-			d.runKeyMonitor(cdur)
+			spj := &MonitorJob{eventProcessor: d}
+			runProtectedJob(d.locker, d.monitorLock, cdur, spj)
 		}
 	}
 }
 
-func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
-	defer timeExecution(time.Now(), "monitor-run")
-	ctx := context.Background()
-	// Try to acquire monitor lock
-	lock, err := d.locker.Obtain(ctx, d.monitorLock, dur, nil)
-	// Lock not acquired? return
-	if err == redislock.ErrNotObtained {
-		log.Debugf("consumer %s : could not obtain monitor lock", d.consumerId)
-		return
-	}
-	defer lock.Release(ctx)
-	// Refresh the lock while the monitor runs with a ticker
-	// running at 1/2 the lock duration
-	ticker := time.NewTicker(dur / 2)
-	defer ticker.Stop()
-	// channel to indicate when the checkKeys routine is completed
-	ch_done := make(chan bool)
-	go d.checkKeys(ctx, dur, ch_done)
-	for {
-		select {
-		case <-ticker.C:
-			// renew lock
-			log.Debugf("consumer %s : still running", d.consumerId)
-			lock.Refresh(ctx, dur, nil)
-		case <-ch_done:
-			// Done
-			log.Debugf("consumer %s : monitor COMPLETED", d.consumerId)
-			return
-		}
-	}
+// Wrapper for monitor - implements ProtectedJobRunner interface
+type MonitorJob struct {
+	eventProcessor *DistributedEventProcessor
 }
-func (d *DistributedEventProcessor) checkKeys(ctx context.Context, dur time.Duration,
-	ch chan bool) {
+
+func (m *MonitorJob) runJob(ch chan bool) {
+	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
+	m.eventProcessor.checkKeys(context.Background())
+}
+
+func (d *DistributedEventProcessor) checkKeys(ctx context.Context) {
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
