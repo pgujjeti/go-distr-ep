@@ -23,10 +23,8 @@ func (d *DistributedEventProcessor) monitorKeys() {
 }
 
 func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(dur))
-	// TODO - limit the duration of cleanup to be under the lock expiration
-	// validate this logic
-	defer cancel()
+	defer timeExecution(time.Now(), "monitor-run")
+	ctx := context.Background()
 	// Try to acquire monitor lock
 	lock, err := d.locker.Obtain(ctx, d.monitorLock, dur, nil)
 	// Lock not acquired? return
@@ -35,6 +33,29 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 		return
 	}
 	defer lock.Release(ctx)
+	// Refresh the lock while the monitor runs with a ticker
+	// running at 1/2 the lock duration
+	ticker := time.NewTicker(dur / 2)
+	defer ticker.Stop()
+	// channel to indicate when the checkKeys routine is completed
+	ch_done := make(chan bool)
+	go d.checkKeys(ctx, dur, ch_done)
+	for {
+		select {
+		case <-ticker.C:
+			// renew lock
+			log.Debugf("consumer %s : still running", d.consumerId)
+			lock.Refresh(ctx, dur, nil)
+		case <-ch_done:
+			// Done
+			log.Debugf("consumer %s : monitor COMPLETED", d.consumerId)
+			return
+		}
+	}
+}
+func (d *DistributedEventProcessor) checkKeys(ctx context.Context, dur time.Duration,
+	ch chan bool) {
+	defer channelDone(ch, true)
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
@@ -44,6 +65,7 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 	}
 	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, d.monitorZset, zrb).Result()
 	if err != nil {
+		log.Warnf("consumer %s : could not run zrangebyscore %v", d.consumerId, err)
 		return
 	}
 	for _, rz := range ra {
@@ -55,9 +77,9 @@ func (d *DistributedEventProcessor) runKeyMonitor(dur time.Duration) {
 			// Renews the check-TTL and launches the key-processor
 			d.keyEventHandler(ctx, key)
 		} else {
-			log.Debugf("key %s shall be deleted", key)
 			// no pending msgs - key will cleaned up after the run
 			// delete the stream?
+			log.Debugf("key %s shall be deleted", key)
 		}
 	}
 	// Delete all items with score < current-time

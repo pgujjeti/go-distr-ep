@@ -51,14 +51,15 @@ func (d *DistributedEventProcessor) eventScheduler() {
 		select {
 		case <-ticker.C:
 			log.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
-			d.pollScheduledEvents(cdur)
+			d.runSchedulerJob(cdur)
 		}
 	}
 }
 
-func (d *DistributedEventProcessor) pollScheduledEvents(dur time.Duration) {
+// TODO - make this reusable code (scheduler, monitor, event-processor)
+func (d *DistributedEventProcessor) runSchedulerJob(dur time.Duration) {
+	defer timeExecution(time.Now(), "scheduler-run")
 	ctx := context.Background()
-	// TODO - limit the duration of poll to be under the lock expiration
 	// Try to acquire scheduler lock
 	lock, err := d.locker.Obtain(ctx, d.schedulerLock, dur, nil)
 	// Lock not acquired? return
@@ -67,6 +68,32 @@ func (d *DistributedEventProcessor) pollScheduledEvents(dur time.Duration) {
 		return
 	}
 	defer lock.Release(ctx)
+	// Refresh the lock while the scheduler runs with a ticker
+	// running at 1/2 the lock duration
+	ticker := time.NewTicker(dur / 2)
+	defer ticker.Stop()
+	// channel to indicate when the checkKeys routine is completed
+	ch_done := make(chan bool)
+	go d.pollScheduledEvents(ctx, dur, ch_done)
+	for {
+		select {
+		case <-ticker.C:
+			// renew lock
+			log.Debugf("consumer %s : schedule poller still running", d.consumerId)
+			lock.Refresh(ctx, dur, nil)
+		case <-ch_done:
+			// Job complete
+			ticker.Stop()
+			log.Debugf("consumer %s : schedule poller COMPLETED", d.consumerId)
+			return
+		}
+	}
+}
+
+func (d *DistributedEventProcessor) pollScheduledEvents(ctx context.Context,
+	dur time.Duration, ch chan bool) {
+	// indicates that polling completed
+	defer channelDone(ch, true)
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
@@ -76,6 +103,8 @@ func (d *DistributedEventProcessor) pollScheduledEvents(dur time.Duration) {
 	}
 	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, d.schedulerZset, zrb).Result()
 	if err != nil {
+		log.Warnf("consumer %s : could not run zrangebyscore on scheduler zset: %v",
+			d.consumerId, err)
 		return
 	}
 	for _, rz := range ra {
@@ -93,11 +122,14 @@ func (d *DistributedEventProcessor) handleCurrentEvent(ctx context.Context, evt_
 			d.schedulerHset, err)
 	} else {
 		if key, err := d.extractKeyFromSchEvtKey(evt_key); err == nil {
+			// submit event to run
 			d.runEvent(key, val)
 		} else {
+			// Should never happen
 			log.Warnf("%s : invalid key found: %v", evt_key, err)
 		}
 	}
+	// Delete event key from Hset & Zset
 	d.RedisClient.HDel(ctx, d.schedulerHset, evt_key).Result()
 	d.RedisClient.ZRem(ctx, d.schedulerZset, evt_key)
 }
