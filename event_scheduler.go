@@ -18,11 +18,19 @@ func (d *DistributedEventProcessor) scheduleEvent(key string, val interface{},
 	ctx := context.Background()
 	evt_key := d.createSchEvtKey(key)
 	// Add key-val to HashSet
-	d.RedisClient.HSet(ctx, d.schedulerHset, evt_key, val)
+	if err := d.RedisClient.HSet(ctx, d.schedulerHset, evt_key, val).Err(); err != nil {
+		log.Warnf("%s : could not schedule event for processing: %v", key, err)
+		return err
+	}
 	// Add key-score to Zset
 	exp_time := time.Now().Add(delay).UnixMilli()
-	d.RedisClient.ZAdd(ctx, d.schedulerZset,
-		&redis.Z{Score: float64(exp_time), Member: evt_key})
+	z := &redis.Z{Score: float64(exp_time), Member: evt_key}
+	if err := d.RedisClient.ZAdd(ctx, d.schedulerZset, z).Err(); err != nil {
+		log.Warnf("%s : could not schedule event for processing: %v", key, err)
+		// Delete the entry from hset
+		d.RedisClient.HDel(ctx, d.schedulerHset, evt_key)
+		return err
+	}
 	log.Debugf("%s : added scheduled event with composite key %s expiring at %v",
 		key, evt_key, exp_time)
 	return nil
