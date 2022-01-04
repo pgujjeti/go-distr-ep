@@ -69,7 +69,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 				key, ln, err)
 			break
 		}
-		ejob := &EventProcessorJob{
+		ejob := &eventProcessorJob{
 			eventProcessor: d,
 			key:            key,
 			val:            msg,
@@ -87,13 +87,13 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 }
 
 // Wrapper for event processor job - implements ProtectedJobRunner interface
-type EventProcessorJob struct {
+type eventProcessorJob struct {
 	eventProcessor *DistributedEventProcessor
 	key            string
 	val            string
 }
 
-func (e *EventProcessorJob) runJob(ch chan bool) {
+func (e *eventProcessorJob) runJob(ch chan bool) {
 	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
 	defer timeExecution(time.Now(), fmt.Sprintf("%s:event", e.key))

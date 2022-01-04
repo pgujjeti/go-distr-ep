@@ -58,18 +58,18 @@ func (d *DistributedEventProcessor) eventScheduler() {
 		select {
 		case <-ticker.C:
 			log.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
-			spj := &SchedulePollJob{eventProcessor: d}
+			spj := &schedulePollJob{eventProcessor: d}
 			runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
 		}
 	}
 }
 
 // Wrapper for schedule poll job - implements ProtectedJobRunner interface
-type SchedulePollJob struct {
+type schedulePollJob struct {
 	eventProcessor *DistributedEventProcessor
 }
 
-func (s *SchedulePollJob) runJob(ch chan bool) {
+func (s *schedulePollJob) runJob(ch chan bool) {
 	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
 	s.eventProcessor.pollScheduledEvents(context.Background())

@@ -9,14 +9,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type ProtectedJobRunner interface {
+type protectedJobRunner interface {
 	runJob(ch chan bool)
 }
 
 // runs a job protected by the named lock
 // the job is executed synchronously by running a ticker to renew the lock
 func runProtectedJob(locker *redislock.Client, lockName string,
-	dur time.Duration, p ProtectedJobRunner) {
+	dur time.Duration, p protectedJobRunner) {
 	defer timeExecution(time.Now(), fmt.Sprintf("%s-run", lockName))
 	ctx := context.Background()
 	// Try to acquire lock
@@ -32,7 +32,7 @@ func runProtectedJob(locker *redislock.Client, lockName string,
 
 // run job with the passed lock (instead of lockname)
 func runProtectedJobWithLock(lock *redislock.Lock,
-	dur time.Duration, p ProtectedJobRunner) {
+	dur time.Duration, p protectedJobRunner) {
 	ctx := context.Background()
 	// Refresh the lock while the job runs with a ticker
 	// running at 1/2 the lock duration

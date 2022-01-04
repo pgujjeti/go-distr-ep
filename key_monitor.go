@@ -16,18 +16,18 @@ func (d *DistributedEventProcessor) monitorKeys() {
 		select {
 		case <-ticker.C:
 			log.Debug("consumer %s : running cleanup ...", d.consumerId)
-			spj := &MonitorJob{eventProcessor: d}
+			spj := &monitorJob{eventProcessor: d}
 			runProtectedJob(d.locker, d.monitorLock, cdur, spj)
 		}
 	}
 }
 
 // Wrapper for monitor - implements ProtectedJobRunner interface
-type MonitorJob struct {
+type monitorJob struct {
 	eventProcessor *DistributedEventProcessor
 }
 
-func (m *MonitorJob) runJob(ch chan bool) {
+func (m *monitorJob) runJob(ch chan bool) {
 	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
 	m.eventProcessor.checkKeys(context.Background())
