@@ -17,14 +17,19 @@ type TestCallbackImpl struct {
 func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}) {
 	// process event
 	log.Infof("(%s) %s : processing event : %+v", t.callbackName, key, val)
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(800 * time.Millisecond)
+}
+
+type TestMessage struct {
+	Key string
+	Val string
 }
 
 func TestRun1(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
 	log.Info("Running test")
-	no_clients, no_msgs := 10, 10
-	msg_delay := time.Millisecond * 300
+	no_clients, no_msgs := 1, 1
+	msg_delay := time.Millisecond * 400
 	for i := 1; i <= no_clients; i++ {
 		cname := fmt.Sprintf("client%v", i)
 		go startClient(cname, no_msgs, msg_delay)
@@ -33,14 +38,16 @@ func TestRun1(t *testing.T) {
 }
 
 func startClient(name string, no_msgs int, msg_delay time.Duration) {
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	client := redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs: []string{"localhost:7000"},
+	})
 	defer client.Close()
 
 	callbackImpl := &TestCallbackImpl{callbackName: name}
 	dep := &distr_ep.DistributedEventProcessor{
 		RedisClient: client,
 		Namespace:   "test1",
-		LockTTL:     time.Millisecond * 100,
+		LockTTL:     time.Millisecond * 600,
 		CleanupDur:  time.Second * 1,
 		Callback:    callbackImpl,
 	}
@@ -48,8 +55,12 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 
 	// Produce events
 	for i := 1; i <= no_msgs; i++ {
-		val := fmt.Sprintf("%s-value-%v", name, i)
-		dep.AddEvent("key1", val, time.Second*2)
+		msg := TestMessage{
+			Key: fmt.Sprintf("%v", i),
+			Val: fmt.Sprintf("%s-value-%v", name, i),
+		}
+		//val_str, _ := json.Marshal(&msg)
+		dep.AddEvent("key1", msg, time.Second*2)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)
 		}

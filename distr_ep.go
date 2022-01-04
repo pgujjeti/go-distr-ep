@@ -23,7 +23,7 @@ type DistributedEventProcessor struct {
 	// namespace
 	Namespace string
 	// redis connection
-	RedisClient *redis.Client
+	RedisClient *redis.ClusterClient
 	// TTL for lock
 	LockTTL time.Duration
 	// cleanup delay
@@ -95,6 +95,12 @@ func (d *DistributedEventProcessor) AddEvent(key string, val interface{},
 	delay time.Duration) error {
 	if !d.initialized {
 		return errors.New("Event Processor is not initialized")
+	}
+	if key == "" {
+		return errors.New("key cant be empty")
+	}
+	if val == nil {
+		return errors.New("Event val cant be null")
 	}
 	if delay > 0 {
 		return d.scheduleEvent(key, val, delay)
