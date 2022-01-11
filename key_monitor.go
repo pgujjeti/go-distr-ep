@@ -57,7 +57,7 @@ func (d *DistributedEventProcessor) checkKeys(ctx context.Context) {
 		} else {
 			// no pending msgs - key will cleaned up after the run
 			// delete the stream?
-			log.Debugf("key %s shall be deleted", key)
+			log.Debugf("key %s shall be deleted from scheduler zset", key)
 		}
 	}
 	// Delete all items with score < current-time
