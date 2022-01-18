@@ -80,9 +80,9 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 		// mark message as processed, by popping the first event from the list
 		d.RedisClient.LPop(ctx, ln)
 		// Lock should be active. Discontinue, if it is not (circuit-breaker)
-		if valid, err := lock.ValidContext(ctx); !valid || err != nil {
+		if until := lock.Until(); time.Now().After(until) {
 			// Lock expired!
-			log.Errorf("%s : LOCK EXPIRE while processing message %s: %v", key, msg, err)
+			log.Errorf("%s : LOCK EXPIRE while processing message %s: ", key, msg)
 			break
 		}
 	}
