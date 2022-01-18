@@ -14,8 +14,8 @@ them among the participating nodes.
 - Events are persisted to redis, for fault-tolerance
 
 ## Dependencies
-- go-redis/v8
-- redislock
+- [go-redis/v8](https://github.com/go-redis/redis)
+- [redsync](https://github.com/go-redsync/redsync) 
 
 ## Example
 ```go
@@ -47,6 +47,12 @@ func main() {
 }
 
 ```
+## Local Test
+You can run a local redis cluster using [grokzen/redis-cluster](https://github.com/Grokzen/docker-redis-cluster)
+```
+docker run -d --name redis-cluster -e "IP=0.0.0.0" -p 7000-7005:7000-7005 grokzen/redis-cluster:latest
+```
+
 ## Design
 The Distributed Event Processor (DEP) framework's goals are:
 - Process events for a _given_ key 
@@ -79,7 +85,7 @@ Key processor attempts to acquire the lock for the specified key and if successf
 ### Key Lock
 The redis key lock is the central piece to achieve sequential processing. It allows us to prevent concurrent execution for the same key. Only one event processor at a time can acquire the lock and thus process events for that key.
 
-As mentioned before, we use the open source library [redislock](https://github.com/bsm/redislock) for this purpose.
+As mentioned before, we use the open source library [redsync](https://github.com/go-redsync/redsync) for distributed locks
 
 ### Key Monitor
 Key Monitor is a background process whose job is to monitor for any keys that are left unattended. Imagine this scenario:

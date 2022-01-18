@@ -1,6 +1,7 @@
 package example
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ type TestMessage struct {
 func TestRun1(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
 	log.Info("Running test")
-	no_clients, no_msgs := 1, 1
+	no_clients, no_msgs := 10, 10
 	msg_delay := time.Millisecond * 400
 	for i := 1; i <= no_clients; i++ {
 		cname := fmt.Sprintf("client%v", i)
@@ -47,7 +48,7 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 	dep := &distr_ep.DistributedEventProcessor{
 		RedisClient: client,
 		Namespace:   "test1",
-		LockTTL:     time.Millisecond * 600,
+		LockTTL:     time.Millisecond * 1000,
 		CleanupDur:  time.Second * 1,
 		Callback:    callbackImpl,
 	}
@@ -59,8 +60,8 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 			Key: fmt.Sprintf("%v", i),
 			Val: fmt.Sprintf("%s-value-%v", name, i),
 		}
-		//val_str, _ := json.Marshal(&msg)
-		dep.AddEvent("key1", msg, time.Second*2)
+		val_str, _ := json.Marshal(&msg)
+		dep.AddEvent("key1", val_str, 0)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)
 		}

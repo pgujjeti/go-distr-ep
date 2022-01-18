@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bsm/redislock"
+	"github.com/go-redsync/redsync/v4"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -15,23 +15,23 @@ type protectedJobRunner interface {
 
 // runs a job protected by the named lock
 // the job is executed synchronously by running a ticker to renew the lock
-func runProtectedJob(locker *redislock.Client, lockName string,
+func runProtectedJob(locker *redsync.Redsync, lockName string,
 	dur time.Duration, p protectedJobRunner) {
 	defer timeExecution(time.Now(), fmt.Sprintf("%s-run", lockName))
 	ctx := context.Background()
 	// Try to acquire lock
-	lock, err := locker.Obtain(ctx, lockName, dur, nil)
+	lock := locker.NewMutex(lockName, redsync.WithExpiry(dur))
 	// Lock not acquired? return
-	if err == redislock.ErrNotObtained {
-		log.Debugf("could not obtain %s lock", lockName)
+	if err := lock.LockContext(ctx); err != nil {
+		log.Debugf("could not obtain %s lock: %v", lockName, err)
 		return
 	}
-	defer lock.Release(ctx)
+	defer lock.UnlockContext(ctx)
 	runProtectedJobWithLock(lock, dur, p)
 }
 
 // run job with the passed lock (instead of lockname)
-func runProtectedJobWithLock(lock *redislock.Lock,
+func runProtectedJobWithLock(lock *redsync.Mutex,
 	dur time.Duration, p protectedJobRunner) {
 	ctx := context.Background()
 	// Refresh the lock while the job runs with a ticker
@@ -45,12 +45,12 @@ func runProtectedJobWithLock(lock *redislock.Lock,
 		select {
 		case <-ticker.C:
 			// job is still running - renew lock
-			log.Debugf("Renewing lock %s", lock.Key())
-			lock.Refresh(ctx, dur, nil)
+			log.Debugf("Renewing lock %s", lock.Name())
+			lock.ExtendContext(ctx)
 		case <-ch_done:
 			// Job complete
 			ticker.Stop()
-			log.Debugf("Protected job COMPLETED %s", lock.Key())
+			log.Debugf("Protected job COMPLETED %s", lock.Name())
 			return
 		}
 	}

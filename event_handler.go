@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bsm/redislock"
+	"github.com/go-redsync/redsync/v4"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -38,21 +38,23 @@ func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key str
 // from the key's LIST
 func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	ctx := context.Background()
-	// Retry once with a time limit of 10 ms
+	// Retry once with a time limit of 100 ms
 	// This is designed to address a potential race condition where another currently
-	// processing thread might have checked out of the message processing loop and
+	// processing client/thread might have completed message processing loop and
 	// is about to release the key-lock
-	retry := redislock.LimitRetry(redislock.LinearBackoff(DEFAULT_LOCK_RETRY_DUR), 1)
 	// Obtain EVENT_LOCK to {NS}:proc-lock:{key}, with TTL
-	lock, err := d.locker.Obtain(ctx, d.processLockForKey(key),
-		d.LockTTL, &redislock.Options{RetryStrategy: retry})
+	lock := d.locker.NewMutex(d.processLockForKey(key),
+		redsync.WithExpiry(d.LockTTL),
+		redsync.WithRetryDelay(DEFAULT_LOCK_RETRY_DUR),
+		redsync.WithTries(1),
+	)
 	// If lock cant be obtained, return
-	if err == redislock.ErrNotObtained {
-		log.Debugf("Client %s couldnt obtain lock for key %s, exiting...", d.consumerId, key)
+	if err := lock.LockContext(ctx); err != nil {
+		log.Debugf("Client %s couldnt obtain lock for key %s: %v", d.consumerId, key, err)
 		return
 	}
 	// Defer lock release
-	defer lock.Release(ctx)
+	defer lock.UnlockContext(ctx)
 	// Start consuming messages from the {NS}:evt-str:{key} stream
 	ln := d.listNameForKey(key)
 	for {
@@ -78,9 +80,9 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 		// mark message as processed, by popping the first event from the list
 		d.RedisClient.LPop(ctx, ln)
 		// Lock should be active. Discontinue, if it is not (circuit-breaker)
-		if ttl, err := lock.TTL(ctx); err != nil || ttl == 0 {
+		if valid, err := lock.ValidContext(ctx); !valid || err != nil {
 			// Lock expired!
-			log.Errorf("%s : LOCK EXPIRE while processing message %s", key, msg)
+			log.Errorf("%s : LOCK EXPIRE while processing message %s: %v", key, msg, err)
 			break
 		}
 	}

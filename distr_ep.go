@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bsm/redislock"
 	"github.com/go-redis/redis/v8"
+	"github.com/go-redsync/redsync/v4"
+	goredis "github.com/go-redsync/redsync/v4/redis/goredis/v8"
 	"github.com/rs/xid"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
 	DEFAULT_LOCK_TTL       = time.Millisecond * 1000
-	DEFAULT_LOCK_RETRY_DUR = time.Millisecond * 10
+	DEFAULT_LOCK_RETRY_DUR = time.Millisecond * 100
 	DEFAULT_CLEANUP_DUR    = time.Second * 10
 	DEFAULT_LIST_TTL       = time.Hour * 24
 	DEFAULT_SCHEDULE_DUR   = time.Second * 1
@@ -43,7 +44,7 @@ type DistributedEventProcessor struct {
 	// Consumer id
 	consumerId string
 	// Locker
-	locker *redislock.Client
+	locker *redsync.Redsync
 	// is initialized
 	initialized bool
 }
@@ -80,7 +81,8 @@ func (d *DistributedEventProcessor) validate() error {
 	if d.CleanupDur == 0 {
 		d.CleanupDur = DEFAULT_CLEANUP_DUR
 	}
-	d.locker = redislock.New(d.RedisClient)
+	pool := goredis.NewPool(d.RedisClient)
+	d.locker = redsync.New(pool)
 	d.groupName = fmt.Sprintf("%s-cg", d.Namespace)
 	d.monitorZset = fmt.Sprintf("%s:mon-zset", d.Namespace)
 	d.monitorLock = fmt.Sprintf("%s:mon-zset:lk", d.Namespace)
