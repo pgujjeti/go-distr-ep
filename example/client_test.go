@@ -18,7 +18,7 @@ type TestCallbackImpl struct {
 func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}) {
 	// process event
 	log.Infof("(%s) %s : processing event : %+v", t.callbackName, key, val)
-	time.Sleep(800 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 }
 
 type TestMessage struct {
@@ -51,6 +51,7 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 		LockTTL:     time.Millisecond * 1000,
 		CleanupDur:  time.Second * 1,
 		Callback:    callbackImpl,
+		LogLevel:    log.ErrorLevel,
 	}
 	dep.Init()
 
