@@ -9,7 +9,7 @@ import (
 	"github.com/go-redsync/redsync/v4"
 	goredis "github.com/go-redsync/redsync/v4/redis/goredis/v8"
 	"github.com/rs/xid"
-	log "github.com/sirupsen/logrus"
+	logrus "github.com/sirupsen/logrus"
 )
 
 const (
@@ -19,6 +19,9 @@ const (
 	DEFAULT_LIST_TTL       = time.Hour * 24
 	DEFAULT_SCHEDULE_DUR   = time.Second * 1
 )
+
+// Package global - can do better
+var dlog = logrus.New()
 
 type DistributedEventProcessor struct {
 	// namespace
@@ -31,6 +34,8 @@ type DistributedEventProcessor struct {
 	CleanupDur time.Duration
 	// Event callback
 	Callback EventCallback
+	// LogLevel
+	LogLevel logrus.Level
 
 	// Group name
 	groupName string
@@ -50,9 +55,10 @@ type DistributedEventProcessor struct {
 }
 
 func (d *DistributedEventProcessor) Init() error {
+	dlog.SetLevel(d.LogLevel)
 	// Init all the resources
 	if err := d.validate(); err != nil {
-		log.Warnf("Validation failed %s", err)
+		dlog.Warnf("Validation failed %s", err)
 		return err
 	}
 	// TODO handle graceful termination of background go-routines

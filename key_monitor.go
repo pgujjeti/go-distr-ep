@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	log "github.com/sirupsen/logrus"
 )
 
 func (d *DistributedEventProcessor) monitorKeys() {
@@ -15,7 +14,7 @@ func (d *DistributedEventProcessor) monitorKeys() {
 	for {
 		select {
 		case <-ticker.C:
-			log.Debug("consumer %s : running cleanup ...", d.consumerId)
+			dlog.Debug("consumer %s : running cleanup ...", d.consumerId)
 			spj := &monitorJob{eventProcessor: d}
 			runProtectedJob(d.locker, d.monitorLock, cdur, spj)
 		}
@@ -37,18 +36,18 @@ func (d *DistributedEventProcessor) checkKeys(ctx context.Context) {
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
-	log.Infof("consumer %s : checking for keys before %s", d.consumerId, c_time_str)
+	dlog.Infof("consumer %s : checking for keys before %s", d.consumerId, c_time_str)
 	zrb := &redis.ZRangeBy{
 		Max: c_time_str,
 	}
 	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, d.monitorZset, zrb).Result()
 	if err != nil {
-		log.Warnf("consumer %s : could not run zrangebyscore %v", d.consumerId, err)
+		dlog.Warnf("consumer %s : could not run zrangebyscore %v", d.consumerId, err)
 		return
 	}
 	for _, rz := range ra {
 		key := rz.Member.(string)
-		log.Debugf("checking key %s with expiry %s", key, rz.Score)
+		dlog.Debugf("checking key %s with expiry %s", key, rz.Score)
 		// Check the key-stream for unprocessed/in-process msgs
 		unprocessed_msg := d.unprocessedMessages(ctx, key)
 		if unprocessed_msg {
@@ -57,7 +56,7 @@ func (d *DistributedEventProcessor) checkKeys(ctx context.Context) {
 		} else {
 			// no pending msgs - key will cleaned up after the run
 			// delete the stream?
-			log.Debugf("key %s shall be deleted from scheduler zset", key)
+			dlog.Debugf("key %s shall be deleted from scheduler zset", key)
 		}
 	}
 	// Delete all items with score < current-time
@@ -68,10 +67,10 @@ func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
 	key string) bool {
 	ln := d.listNameForKey(key)
 	len, err := d.RedisClient.LLen(ctx, ln).Result()
-	log.Tracef("%s : %v unprocessed messages in LIST %s", key, len, ln)
+	dlog.Tracef("%s : %v unprocessed messages in LIST %s", key, len, ln)
 	if err != nil {
 		// error handling
-		log.Warnf("%s : couldnt find the length of LIST %s", key, ln)
+		dlog.Warnf("%s : couldnt find the length of LIST %s", key, ln)
 		return false
 	}
 	return len > 0

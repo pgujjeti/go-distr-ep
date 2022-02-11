@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-redsync/redsync/v4"
-	log "github.com/sirupsen/logrus"
 )
 
 func (d *DistributedEventProcessor) runEvent(key string, val interface{}) error {
@@ -15,9 +14,9 @@ func (d *DistributedEventProcessor) runEvent(key string, val interface{}) error 
 	ln := d.listNameForKey(key)
 	// Add new events to the end of the list
 	r, err := d.RedisClient.RPush(ctx, ln, val).Result()
-	log.Debugf("%s : add event for processing result: %v, %v", key, r, err)
+	dlog.Debugf("%s : add event for processing result: %v, %v", key, r, err)
 	if err != nil {
-		log.Warnf("%s : could not add event for processing: %v", key, err)
+		dlog.Warnf("%s : could not add event for processing: %v", key, err)
 		return err
 	}
 	// renew List expiry
@@ -50,7 +49,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	)
 	// If lock cant be obtained, return
 	if err := lock.LockContext(ctx); err != nil {
-		log.Debugf("Client %s couldnt obtain lock for key %s: %v", d.consumerId, key, err)
+		dlog.Debugf("Client %s couldnt obtain lock for key %s: %v", d.consumerId, key, err)
 		return
 	}
 	// Defer lock release
@@ -59,15 +58,15 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	ln := d.listNameForKey(key)
 	for {
 		len, err := d.RedisClient.LLen(ctx, ln).Result()
-		log.Debugf("%s : %v elements to process in %s: %v", key, len, ln, err)
+		dlog.Debugf("%s : %v elements to process in %s: %v", key, len, ln, err)
 		if len == 0 || err != nil {
-			log.Warnf("%s : no more messages to process: %v", key, err)
+			dlog.Warnf("%s : no more messages to process: %v", key, err)
 			break
 		}
 		// Seek the first event (event is removed post-processing)
 		msg, err := d.RedisClient.LIndex(ctx, ln, 0).Result()
 		if err != nil {
-			log.Infof("%s : couldnt fetch the first element from %s: %v",
+			dlog.Infof("%s : couldnt fetch the first element from %s: %v",
 				key, ln, err)
 			break
 		}
@@ -82,7 +81,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 		// Lock should be active. Discontinue, if it is not (circuit-breaker)
 		if until := lock.Until(); time.Now().After(until) {
 			// Lock expired!
-			log.Errorf("%s : LOCK EXPIRE while processing message %s: ", key, msg)
+			dlog.Errorf("%s : LOCK EXPIRE while processing message %s: ", key, msg)
 			break
 		}
 	}

@@ -3,8 +3,6 @@ package distr_ep
 import (
 	"fmt"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type EventCallback interface {
@@ -24,7 +22,7 @@ func (d *DistributedEventProcessor) processLockForKey(key string) string {
 // use to time execution of a function, block, etc
 func timeExecution(start time.Time, label string) {
 	dur := time.Since(start)
-	log.Debugf("%s: execution time (ns): %v", label, dur.Nanoseconds())
+	dlog.Debugf("%s: execution time (ns): %v", label, dur.Nanoseconds())
 }
 
 // use to indicate completion of a routine

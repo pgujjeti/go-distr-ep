@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-redsync/redsync/v4"
-	log "github.com/sirupsen/logrus"
 )
 
 type protectedJobRunner interface {
@@ -23,7 +22,7 @@ func runProtectedJob(locker *redsync.Redsync, lockName string,
 	lock := locker.NewMutex(lockName, redsync.WithExpiry(dur))
 	// Lock not acquired? return
 	if err := lock.LockContext(ctx); err != nil {
-		log.Debugf("could not obtain %s lock: %v", lockName, err)
+		dlog.Debugf("could not obtain %s lock: %v", lockName, err)
 		return
 	}
 	defer lock.UnlockContext(ctx)
@@ -45,12 +44,12 @@ func runProtectedJobWithLock(lock *redsync.Mutex,
 		select {
 		case <-ticker.C:
 			// job is still running - renew lock
-			log.Debugf("Renewing lock %s", lock.Name())
+			dlog.Debugf("Renewing lock %s", lock.Name())
 			lock.ExtendContext(ctx)
 		case <-ch_done:
 			// Job complete
 			ticker.Stop()
-			log.Debugf("Protected job COMPLETED %s", lock.Name())
+			dlog.Debugf("Protected job COMPLETED %s", lock.Name())
 			return
 		}
 	}

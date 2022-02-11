@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/rs/xid"
-	log "github.com/sirupsen/logrus"
 )
 
 func (d *DistributedEventProcessor) scheduleEvent(key string, val interface{},
@@ -19,19 +18,19 @@ func (d *DistributedEventProcessor) scheduleEvent(key string, val interface{},
 	evt_key := d.createSchEvtKey(key)
 	// Add key-val to HashSet
 	if err := d.RedisClient.HSet(ctx, d.schedulerHset, evt_key, val).Err(); err != nil {
-		log.Warnf("%s : could not schedule event for processing: %v", key, err)
+		dlog.Warnf("%s : could not schedule event for processing: %v", key, err)
 		return err
 	}
 	// Add key-score to Zset
 	exp_time := time.Now().Add(delay).UnixMilli()
 	z := &redis.Z{Score: float64(exp_time), Member: evt_key}
 	if err := d.RedisClient.ZAdd(ctx, d.schedulerZset, z).Err(); err != nil {
-		log.Warnf("%s : could not schedule event for processing: %v", key, err)
+		dlog.Warnf("%s : could not schedule event for processing: %v", key, err)
 		// Delete the entry from hset
 		d.RedisClient.HDel(ctx, d.schedulerHset, evt_key)
 		return err
 	}
-	log.Debugf("%s : added scheduled event with composite key %s expiring at %v",
+	dlog.Debugf("%s : added scheduled event with composite key %s expiring at %v",
 		key, evt_key, exp_time)
 	return nil
 }
@@ -47,7 +46,7 @@ func (d *DistributedEventProcessor) extractKeyFromSchEvtKey(evt_key string) (str
 		return "", errors.New("invalid key")
 	}
 	key := k_parts[2]
-	log.Debugf("Extracted key %s from composite key %s", key, evt_key)
+	dlog.Debugf("Extracted key %s from composite key %s", key, evt_key)
 	return key, nil
 }
 
@@ -57,7 +56,7 @@ func (d *DistributedEventProcessor) eventScheduler() {
 	for {
 		select {
 		case <-ticker.C:
-			log.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
+			dlog.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
 			spj := &schedulePollJob{eventProcessor: d}
 			runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
 		}
@@ -79,19 +78,19 @@ func (d *DistributedEventProcessor) pollScheduledEvents(ctx context.Context) {
 	// Check ZSet for scores < current-time
 	c_time := time.Now().UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
-	log.Infof("consumer %s : checking for events before %s", d.consumerId, c_time_str)
+	dlog.Infof("consumer %s : checking for events before %s", d.consumerId, c_time_str)
 	zrb := &redis.ZRangeBy{
 		Max: c_time_str,
 	}
 	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, d.schedulerZset, zrb).Result()
 	if err != nil {
-		log.Warnf("consumer %s : could not run zrangebyscore on scheduler zset: %v",
+		dlog.Warnf("consumer %s : could not run zrangebyscore on scheduler zset: %v",
 			d.consumerId, err)
 		return
 	}
 	for _, rz := range ra {
 		evt_key := rz.Member.(string)
-		log.Debugf("checking key %s with expiry %s", evt_key, rz.Score)
+		dlog.Debugf("checking key %s with expiry %s", evt_key, rz.Score)
 		d.handleCurrentEvent(ctx, evt_key)
 	}
 }
@@ -100,7 +99,7 @@ func (d *DistributedEventProcessor) handleCurrentEvent(ctx context.Context, evt_
 	// run event & delete event
 	val, err := d.RedisClient.HGet(ctx, d.schedulerHset, evt_key).Result()
 	if err != nil {
-		log.Warnf("%s : could not find value in hash set %s: %v", evt_key,
+		dlog.Warnf("%s : could not find value in hash set %s: %v", evt_key,
 			d.schedulerHset, err)
 	} else {
 		if key, err := d.extractKeyFromSchEvtKey(evt_key); err == nil {
@@ -108,7 +107,7 @@ func (d *DistributedEventProcessor) handleCurrentEvent(ctx context.Context, evt_
 			d.runEvent(key, val)
 		} else {
 			// Should never happen
-			log.Warnf("%s : invalid key found: %v", evt_key, err)
+			dlog.Warnf("%s : invalid key found: %v", evt_key, err)
 		}
 	}
 	// Delete event key from Hset & Zset
