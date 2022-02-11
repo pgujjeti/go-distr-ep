@@ -64,7 +64,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 			break
 		}
 		// Seek the first event (event is removed post-processing)
-		msg, err := d.RedisClient.LIndex(ctx, ln, 0).Result()
+		msg, err := d.fetchNextEvent(ctx, ln)
 		if err != nil {
 			dlog.Infof("%s : couldnt fetch the first element from %s: %v",
 				key, ln, err)
@@ -76,8 +76,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 			val:            msg,
 		}
 		runProtectedJobWithLock(lock, d.LockTTL, ejob)
-		// mark message as processed, by popping the first event from the list
-		d.RedisClient.LPop(ctx, ln)
+		d.markEventProcessed(ctx, ln, msg)
 		// Lock should be active. Discontinue, if it is not (circuit-breaker)
 		if until := lock.Until(); time.Now().After(until) {
 			// Lock expired!
@@ -85,6 +84,27 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 			break
 		}
 	}
+}
+
+func (d *DistributedEventProcessor) fetchNextEvent(ctx context.Context,
+	ln string) (string, error) {
+	// If atleast-once semantics are set, peek the message. The message shall be
+	// popped at the end of event processing in markEventProcessed()
+	if d.AtLeastOnce {
+		return d.RedisClient.LIndex(ctx, ln, 0).Result()
+	}
+	return d.RedisClient.LPop(ctx, ln).Result()
+}
+
+func (d *DistributedEventProcessor) markEventProcessed(ctx context.Context,
+	ln string, msg string) error {
+	dlog.Tracef("list [%s] : event processed : %s", ln, msg)
+	var err error
+	if d.AtLeastOnce {
+		// mark message as processed, by popping the first event from the list
+		_, err = d.RedisClient.LPop(ctx, ln).Result()
+	}
+	return err
 }
 
 // Wrapper for event processor job - implements ProtectedJobRunner interface

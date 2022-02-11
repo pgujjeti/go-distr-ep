@@ -36,6 +36,9 @@ type DistributedEventProcessor struct {
 	Callback EventCallback
 	// LogLevel
 	LogLevel logrus.Level
+	// EventProcessingMode - set to true if retry is required
+	// default is atmost once
+	AtLeastOnce bool
 
 	// Group name
 	groupName string
