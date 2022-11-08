@@ -62,7 +62,7 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 			Val: fmt.Sprintf("%s-value-%v", name, i),
 		}
 		val_str, _ := json.Marshal(&msg)
-		dep.AddEvent("key1", val_str, 0)
+		dep.AddEvent("key1", val_str)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)
 		}

@@ -53,13 +53,10 @@ func (d *DistributedEventProcessor) extractKeyFromSchEvtKey(evt_key string) (str
 func (d *DistributedEventProcessor) eventScheduler() {
 	cdur := DEFAULT_SCHEDULE_DUR
 	ticker := time.NewTicker(cdur)
-	for {
-		select {
-		case <-ticker.C:
-			dlog.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
-			spj := &schedulePollJob{eventProcessor: d}
-			runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
-		}
+	for range ticker.C {
+		dlog.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
+		spj := &schedulePollJob{eventProcessor: d}
+		runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
 	}
 }
 

@@ -42,8 +42,10 @@ func main() {
 	}
 	dep.Init()
 
-	// Produce events
-	dep.AddEvent("key1", val, 0)
+	// Add an event to processing
+	dep.AddEvent("key1", val)
+	// Schedule an event for processing after 5 seconds
+	dep.ScheduleEvent("key1", val, time.Second * 5)
 }
 
 ```

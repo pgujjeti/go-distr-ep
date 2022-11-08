@@ -76,13 +76,13 @@ func (d *DistributedEventProcessor) Init() error {
 func (d *DistributedEventProcessor) validate() error {
 	// Init all the resources
 	if len(d.Namespace) == 0 {
-		return errors.New("Namespace is required")
+		return errors.New("namespace is required")
 	}
 	if d.Callback == nil {
-		return errors.New("Callback is required")
+		return errors.New("callback is required")
 	}
 	if d.RedisClient == nil {
-		return errors.New("Missign redis client")
+		return errors.New("redis client is required")
 	}
 	if d.LockTTL == 0 {
 		d.LockTTL = DEFAULT_LOCK_TTL
@@ -102,16 +102,20 @@ func (d *DistributedEventProcessor) validate() error {
 	return nil
 }
 
-func (d *DistributedEventProcessor) AddEvent(key string, val interface{},
+func (d *DistributedEventProcessor) AddEvent(key string, val interface{}) error {
+	return d.ScheduleEvent(key, val, 0)
+}
+
+func (d *DistributedEventProcessor) ScheduleEvent(key string, val interface{},
 	delay time.Duration) error {
 	if !d.initialized {
-		return errors.New("Event Processor is not initialized")
+		return errors.New("not-initialized")
 	}
 	if key == "" {
 		return errors.New("key cant be empty")
 	}
 	if val == nil {
-		return errors.New("Event val cant be null")
+		return errors.New("val is nil")
 	}
 	if delay > 0 {
 		return d.scheduleEvent(key, val, delay)
