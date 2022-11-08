@@ -39,6 +39,8 @@ type DistributedEventProcessor struct {
 	// EventProcessingMode - set to true if retry is required
 	// default is atmost once
 	AtLeastOnce bool
+	// Scheduling enabled
+	Scheduling bool
 
 	// Group name
 	groupName string
