@@ -14,7 +14,7 @@ import (
 func (d *DistributedEventProcessor) scheduleEvent(key string, val interface{},
 	delay time.Duration) error {
 	if !d.Scheduling {
-		dlog.Warn("%s : event scheduling is disabled", d.consumerId)
+		dlog.Warnf("%s : event scheduling is disabled", d.consumerId)
 		return errors.New("scheduling disabled")
 	}
 	// add event to the scheduler zset
@@ -56,13 +56,13 @@ func (d *DistributedEventProcessor) extractKeyFromSchEvtKey(evt_key string) (str
 
 func (d *DistributedEventProcessor) eventScheduler() {
 	if !d.Scheduling {
-		dlog.Warn("%s : Event Scheduling is disabled", d.consumerId)
+		dlog.Infof("%s : Event Scheduling is disabled", d.consumerId)
 		return
 	}
 	cdur := DEFAULT_SCHEDULE_DUR
 	ticker := time.NewTicker(cdur)
 	for range ticker.C {
-		dlog.Debug("consumer %s : checking for scheduled jobs ...", d.consumerId)
+		dlog.Debugf("consumer %s : checking for scheduled jobs ...", d.consumerId)
 		spj := &schedulePollJob{eventProcessor: d}
 		runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
 	}
