@@ -54,6 +54,7 @@ You can run a local redis cluster using [grokzen/redis-cluster](https://github.c
 ```
 docker run -d --name redis-cluster -e "IP=0.0.0.0" -p 7000-7005:7000-7005 grokzen/redis-cluster:latest
 ```
+Note: On MacOS, port 7000 is alredy bound by [AirPlay receiver](https://developer.apple.com/forums/thread/682332)
 
 ## Design
 The Distributed Event Processor (DEP) framework's goals are:
