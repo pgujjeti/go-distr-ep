@@ -11,6 +11,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	SESSION_ID_KEY = "key1"
+)
+
 type TestCallbackImpl struct {
 	callbackName string
 }
@@ -29,7 +33,7 @@ type TestMessage struct {
 func TestRun1(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
 	log.Info("Running test")
-	no_clients, no_msgs := 10, 10
+	no_clients, no_msgs := 1, 10
 	msg_delay := time.Millisecond * 400
 	for i := 1; i <= no_clients; i++ {
 		cname := fmt.Sprintf("client%v", i)
@@ -52,20 +56,38 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 		CleanupDur:  time.Second * 1,
 		Callback:    callbackImpl,
 		LogLevel:    log.ErrorLevel,
+		Scheduling:  true,
 	}
 	dep.Init()
 
 	// Produce events
-	for i := 1; i <= no_msgs; i++ {
-		msg := TestMessage{
-			Key: fmt.Sprintf("%v", i),
-			Val: fmt.Sprintf("%s-value-%v", name, i),
-		}
-		val_str, _ := json.Marshal(&msg)
-		dep.AddEvent("key1", val_str)
+	start_ctr := 1
+	produceMessages(dep, name, start_ctr, no_msgs, msg_delay)
+	start_ctr += no_msgs
+	msg := createMessage(name, start_ctr)
+	sch_delay := 2 * time.Second
+	log.Infof("Scheduling message %s to exec after %v seconds", msg, sch_delay)
+	dep.ScheduleEvent(SESSION_ID_KEY, msg, sch_delay)
+	start_ctr++
+	produceMessages(dep, name, start_ctr, no_msgs, msg_delay)
+	time.Sleep(time.Second * 10)
+}
+
+func produceMessages(dep *distr_ep.DistributedEventProcessor, name string, start_ctr int, no_msgs int, msg_delay time.Duration) {
+	for i := start_ctr; i < (no_msgs + start_ctr); i++ {
+		msg := createMessage(name, i)
+		dep.AddEvent(SESSION_ID_KEY, msg)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)
 		}
 	}
-	time.Sleep(time.Second * 10)
+}
+
+func createMessage(name string, ctr int) string {
+	msg := TestMessage{
+		Key: fmt.Sprintf("%v", ctr),
+		Val: fmt.Sprintf("%s-value-%v", name, ctr),
+	}
+	val_str, _ := json.Marshal(&msg)
+	return string(val_str)
 }
