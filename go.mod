@@ -5,6 +5,7 @@ go 1.19
 require (
 	github.com/go-redis/redis/v8 v8.11.4
 	github.com/go-redsync/redsync/v4 v4.5.0
+	github.com/goccy/go-json v0.10.0
 	github.com/rs/xid v1.3.0
 	github.com/sirupsen/logrus v1.8.1
 )
