@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	DEFAULT_LOCK_TTL       = time.Millisecond * 1000
-	DEFAULT_LOCK_RETRY_DUR = time.Millisecond * 100
-	DEFAULT_CLEANUP_DUR    = time.Second * 10
-	DEFAULT_LIST_TTL       = time.Hour * 24
-	DEFAULT_SCHEDULE_DUR   = time.Second * 1
+	LOCK_TTL       = time.Hour * 24
+	LOCK_RETRY_DUR = time.Millisecond * 100
+	CLEANUP_DUR    = time.Second * 10
+	LIST_TTL       = time.Hour * 24
+	SCHEDULE_DUR   = time.Second * 1
+	EVT_POLL_TO    = time.Second * 3600 * 1
 )
 
 // Package global - can do better
@@ -41,9 +42,9 @@ type DistributedEventProcessor struct {
 	AtLeastOnce bool
 	// Scheduling enabled
 	Scheduling bool
+	// Event polling timeout
+	EventPollTimeout time.Duration
 
-	// Group name
-	groupName string
 	// Monitor ZSET
 	monitorZset string
 	monitorLock string
@@ -51,6 +52,11 @@ type DistributedEventProcessor struct {
 	schedulerZset string
 	schedulerLock string
 	schedulerHset string
+	// Pending Keys
+	pKeyList   string
+	pkProcList string
+	// Processing Set
+	psKey string
 	// Consumer id
 	consumerId string
 	// Locker
@@ -71,6 +77,8 @@ func (d *DistributedEventProcessor) Init() error {
 	go d.monitorKeys()
 	// Start the scheduler gorouting
 	go d.eventScheduler()
+	// Start the Pending Key processor
+	go d.pendingKeysConsumer()
 	d.initialized = true
 	return nil
 }
@@ -87,41 +95,46 @@ func (d *DistributedEventProcessor) validate() error {
 		return errors.New("redis client is required")
 	}
 	if d.LockTTL == 0 {
-		d.LockTTL = DEFAULT_LOCK_TTL
+		d.LockTTL = LOCK_TTL
 	}
 	if d.CleanupDur == 0 {
-		d.CleanupDur = DEFAULT_CLEANUP_DUR
+		d.CleanupDur = CLEANUP_DUR
+	}
+	if d.EventPollTimeout == 0 {
+		d.EventPollTimeout = EVT_POLL_TO
 	}
 	pool := goredis.NewPool(d.RedisClient)
-	d.locker = redsync.New(pool)
-	d.groupName = fmt.Sprintf("%s-cg", d.Namespace)
-	d.monitorZset = fmt.Sprintf("%s:mon-zset", d.Namespace)
-	d.monitorLock = fmt.Sprintf("%s:mon-zset:lk", d.Namespace)
-	d.schedulerZset = fmt.Sprintf("%s:sch-zset", d.Namespace)
-	d.schedulerLock = fmt.Sprintf("%s:sch-zset:lk", d.Namespace)
-	d.schedulerHset = fmt.Sprintf("%s:sch-hset", d.Namespace)
 	d.consumerId = xid.New().String()
+	d.locker = redsync.New(pool)
+	d.pKeyList = fmt.Sprintf("dep:%s:pkeys", d.Namespace)
+	d.pkProcList = fmt.Sprintf("dep:%s:pk-proc", d.Namespace)
+	d.monitorZset = fmt.Sprintf("dep:%s:mon-zset", d.Namespace)
+	d.monitorLock = fmt.Sprintf("dep:%s:mon-zset:lk", d.Namespace)
+	d.schedulerZset = fmt.Sprintf("dep:%s:sch-zset", d.Namespace)
+	d.schedulerLock = fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace)
+	d.schedulerHset = fmt.Sprintf("dep:%s:sch-hset", d.Namespace)
+	d.psKey = fmt.Sprintf("dep:%s:ps:%s", d.Namespace, d.consumerId)
 	return nil
 }
 
-func (d *DistributedEventProcessor) AddEvent(key string, val interface{}) error {
-	return d.ScheduleEvent(key, val, 0)
+func (d *DistributedEventProcessor) AddEvent(e *DistrEvent) error {
+	return d.ScheduleEvent(e, 0)
 }
 
-func (d *DistributedEventProcessor) ScheduleEvent(key string, val interface{},
+func (d *DistributedEventProcessor) ScheduleEvent(e *DistrEvent,
 	delay time.Duration) error {
 	if !d.initialized {
 		return errors.New("not-initialized")
 	}
-	if key == "" {
+	if e.Key == "" {
 		return errors.New("key cant be empty")
 	}
-	if val == nil {
+	if e.Val == nil {
 		return errors.New("val is nil")
 	}
 	if delay > 0 {
-		return d.scheduleEvent(key, val, delay)
+		return d.scheduleEvent(e, delay)
 	}
 	// run the event now
-	return d.runEvent(key, val)
+	return d.runEvent(e)
 }

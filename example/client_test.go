@@ -19,6 +19,10 @@ type TestCallbackImpl struct {
 	callbackName string
 }
 
+func (t *TestCallbackImpl) StartProcessing(key string) {
+	// TODO - start processing
+}
+
 func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}) {
 	// process event
 	log.Infof("(%s) %s : processing event : %+v", t.callbackName, key, val)
@@ -67,7 +71,8 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 	msg := createMessage(name, start_ctr)
 	sch_delay := 2 * time.Second
 	log.Infof("Scheduling message %s to exec after %v seconds", msg, sch_delay)
-	dep.ScheduleEvent(SESSION_ID_KEY, msg, sch_delay)
+	e := &distr_ep.DistrEvent{Key: SESSION_ID_KEY, Val: msg}
+	dep.ScheduleEvent(e, sch_delay)
 	start_ctr++
 	produceMessages(dep, name, start_ctr, no_msgs, msg_delay)
 	time.Sleep(time.Second * 10)
@@ -76,7 +81,8 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 func produceMessages(dep *distr_ep.DistributedEventProcessor, name string, start_ctr int, no_msgs int, msg_delay time.Duration) {
 	for i := start_ctr; i < (no_msgs + start_ctr); i++ {
 		msg := createMessage(name, i)
-		dep.AddEvent(SESSION_ID_KEY, msg)
+		e := &distr_ep.DistrEvent{Key: SESSION_ID_KEY, Val: msg}
+		dep.AddEvent(e)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)
 		}

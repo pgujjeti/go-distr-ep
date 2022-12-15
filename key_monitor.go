@@ -9,6 +9,8 @@ import (
 )
 
 func (d *DistributedEventProcessor) monitorKeys() {
+	// TODO PKD : update this processor's timestamp in ZSET
+	// Run the checker to see if a processor is dead
 	cdur := d.CleanupDur
 	ticker := time.NewTicker(cdur)
 	for range ticker.C {
@@ -73,10 +75,14 @@ func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
 	return len > 0
 }
 
-func (d *DistributedEventProcessor) refreshKeyMonitorExpiry(ctx context.Context,
-	key string) {
-	// add this key with an expiry of 2 * LockTTL
-	exp_time := time.Now().Add(d.LockTTL * 2).UnixMilli()
-	d.RedisClient.ZAdd(ctx, d.monitorZset,
-		&redis.Z{Score: float64(exp_time), Member: key})
+func (d *DistributedEventProcessor) addKeyToProcessor(ctx context.Context, key string) error {
+	ps_key := d.processorSetKey()
+	dlog.Infof("%s : adding key %s to list of keys at %s", d.consumerId, key, ps_key)
+	r, err := d.RedisClient.SAdd(ctx, ps_key, key).Result()
+	dlog.Debugf("%s : added key %s with result %v: %v", d.consumerId, key, r, err)
+	return err
+}
+
+func (d *DistributedEventProcessor) processorSetKey() string {
+	return d.psKey
 }

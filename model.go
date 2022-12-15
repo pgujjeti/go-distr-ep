@@ -6,7 +6,15 @@ import (
 )
 
 type EventCallback interface {
+	// invoked when start processing
+	StartProcessing(key string)
 	ProcessEvent(key string, val interface{})
+}
+
+type DistrEvent struct {
+	Key   string
+	Val   interface{}
+	Start bool
 }
 
 func (d *DistributedEventProcessor) listNameForKey(key string) string {

@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/goccy/go-json"
 	"github.com/rs/xid"
 )
 
-func (d *DistributedEventProcessor) scheduleEvent(key string, val interface{},
+func (d *DistributedEventProcessor) scheduleEvent(e *DistrEvent,
 	delay time.Duration) error {
 	if !d.Scheduling {
 		dlog.Warnf("%s : event scheduling is disabled", d.consumerId)
@@ -19,9 +19,16 @@ func (d *DistributedEventProcessor) scheduleEvent(key string, val interface{},
 	}
 	// add event to the scheduler zset
 	ctx := context.Background()
+	key := e.Key
 	evt_key := d.createSchEvtKey(key)
 	// Add key-val to HashSet
-	if err := d.RedisClient.HSet(ctx, d.schedulerHset, evt_key, val).Err(); err != nil {
+	var evt_s []byte
+	var err error
+	if evt_s, err = json.Marshal(e); err != nil {
+		dlog.Warnf("%s : could not marshal event for scheduling: %v", key, err)
+		return err
+	}
+	if err := d.RedisClient.HSet(ctx, d.schedulerHset, evt_key, evt_s).Err(); err != nil {
 		dlog.Warnf("%s : could not schedule event for processing: %v", key, err)
 		return err
 	}
@@ -44,22 +51,12 @@ func (d *DistributedEventProcessor) createSchEvtKey(key string) string {
 	return fmt.Sprintf("%s:%s:%s", uid, d.consumerId, key)
 }
 
-func (d *DistributedEventProcessor) extractKeyFromSchEvtKey(evt_key string) (string, error) {
-	k_parts := strings.Split(evt_key, ":")
-	if len(k_parts) != 3 {
-		return "", errors.New("invalid key")
-	}
-	key := k_parts[2]
-	dlog.Debugf("Extracted key %s from composite key %s", key, evt_key)
-	return key, nil
-}
-
 func (d *DistributedEventProcessor) eventScheduler() {
 	if !d.Scheduling {
 		dlog.Infof("%s : Event Scheduling is disabled", d.consumerId)
 		return
 	}
-	cdur := DEFAULT_SCHEDULE_DUR
+	cdur := SCHEDULE_DUR
 	ticker := time.NewTicker(cdur)
 	for range ticker.C {
 		dlog.Debugf("consumer %s : checking for scheduled jobs ...", d.consumerId)
@@ -102,20 +99,23 @@ func (d *DistributedEventProcessor) pollScheduledEvents(ctx context.Context) {
 
 func (d *DistributedEventProcessor) handleCurrentEvent(ctx context.Context, evt_key string) {
 	// run event & delete event
+	defer func() {
+		// Delete event key from Hset & Zset
+		d.RedisClient.HDel(ctx, d.schedulerHset, evt_key).Result()
+		d.RedisClient.ZRem(ctx, d.schedulerZset, evt_key)
+	}()
 	val, err := d.RedisClient.HGet(ctx, d.schedulerHset, evt_key).Result()
 	if err != nil {
 		dlog.Warnf("%s : could not find value in hash set %s: %v", evt_key,
 			d.schedulerHset, err)
-	} else {
-		if key, err := d.extractKeyFromSchEvtKey(evt_key); err == nil {
-			// submit event to run
-			d.runEvent(key, val)
-		} else {
-			// Should never happen
-			dlog.Warnf("%s : invalid key found: %v", evt_key, err)
-		}
+		return
 	}
-	// Delete event key from Hset & Zset
-	d.RedisClient.HDel(ctx, d.schedulerHset, evt_key).Result()
-	d.RedisClient.ZRem(ctx, d.schedulerZset, evt_key)
+	var e DistrEvent
+	if err := json.Unmarshal([]byte(val), &e); err == nil {
+		// submit event to run
+		d.runEvent(&e)
+	} else {
+		// Should never happen
+		dlog.Warnf("%s : invalid key found: %v", evt_key, err)
+	}
 }

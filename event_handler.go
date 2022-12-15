@@ -5,29 +5,67 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/go-redsync/redsync/v4"
 )
 
-func (d *DistributedEventProcessor) runEvent(key string, val interface{}) error {
+func (d *DistributedEventProcessor) runEvent(e *DistrEvent) error {
 	// add the event into key-specific {NS}:events:{key} entity
 	ctx := context.Background()
+	key := e.Key
 	ln := d.listNameForKey(key)
+	// add to Pending Keys list, if its a start event
+	if e.Start {
+		// TODO PKD - atomic op (along with insertion into key's event list)
+		d.pendingKey(e)
+	}
 	// Add new events to the end of the list
-	r, err := d.RedisClient.RPush(ctx, ln, val).Result()
+	r, err := d.RedisClient.RPush(ctx, ln, e.Val).Result()
 	dlog.Debugf("%s : add event for processing result: %v, %v", key, r, err)
 	if err != nil {
 		dlog.Warnf("%s : could not add event for processing: %v", key, err)
 		return err
 	}
 	// renew List expiry
-	d.RedisClient.Expire(ctx, ln, DEFAULT_LIST_TTL)
-	d.keyEventHandler(ctx, key)
+	d.RedisClient.Expire(ctx, ln, LIST_TTL)
 	return nil
 }
 
+func (d *DistributedEventProcessor) pendingKey(e *DistrEvent) error {
+	key := e.Key
+	ln := d.pKeyList
+	ctx := context.Background()
+	// add the key to pending keys
+	r, err := d.RedisClient.RPush(ctx, ln, key).Result()
+	dlog.Debugf("%s : add key to pending keys result: %v, %v", key, r, err)
+	if err != nil {
+		dlog.Warnf("%s : could not add key to pending keys: %v", key, err)
+		return err
+	}
+	return nil
+}
+
+// consume and run pending keys
+func (d *DistributedEventProcessor) pendingKeysConsumer() {
+	// run the consumer loop
+	for {
+		ctx := context.Background()
+		// TODO PKD - use BLMove with a temp processing list
+		// key, err := d.RedisClient.BLMove(ctx, d.pKeyList, d.pkProcList, "LEFT", "RIGHT", 0).Result()
+		key, err := d.RedisClient.BLPop(ctx, 0, d.pKeyList).Result()
+		if err == redis.Nil || len(key) == 0 {
+			dlog.Debugf("%s : no pending keys; retrying", d.consumerId)
+			continue
+		}
+		if err != nil {
+			dlog.Warnf("%s : fetching pending keys failed.. retrying: %v", d.consumerId, err)
+			continue
+		}
+		d.keyEventHandler(ctx, key[0])
+	}
+}
+
 func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key string) {
-	// add to the monitor ZSET {NS}:k-monitor
-	d.refreshKeyMonitorExpiry(ctx, key)
 	// Kick off the event handler as a go-routine
 	go d.runKeyProcessor(key)
 }
@@ -44,7 +82,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	// Obtain EVENT_LOCK to {NS}:proc-lock:{key}, with TTL
 	lock := d.locker.NewMutex(d.processLockForKey(key),
 		redsync.WithExpiry(d.LockTTL),
-		redsync.WithRetryDelay(DEFAULT_LOCK_RETRY_DUR),
+		redsync.WithRetryDelay(LOCK_RETRY_DUR),
 		redsync.WithTries(1),
 	)
 	// If lock cant be obtained, return
@@ -54,16 +92,15 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 	}
 	// Defer lock release
 	defer lock.UnlockContext(ctx)
+	// add this key to this processor's active list
+	d.addKeyToProcessor(ctx, key)
 	// Start consuming messages from the {NS}:evt-str:{key} stream
 	ln := d.listNameForKey(key)
 	for {
-		len, err := d.RedisClient.LLen(ctx, ln).Result()
-		dlog.Debugf("%s : %v elements to process in %s: %v", key, len, ln, err)
-		if len == 0 || err != nil {
-			dlog.Warnf("%s : no more messages to process: %v", key, err)
-			break
-		}
 		// Seek the first event (event is removed post-processing)
+		// TODO PKD - consume messages
+		// renew the key before every turn
+		// stop the loop when processing is completed
 		msg, err := d.fetchNextEvent(ctx, ln)
 		if err != nil {
 			dlog.Infof("%s : couldnt fetch the first element from %s: %v",
@@ -77,12 +114,6 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string) {
 		}
 		runProtectedJobWithLock(lock, d.LockTTL, ejob)
 		d.markEventProcessed(ctx, ln, msg)
-		// Lock should be active. Discontinue, if it is not (circuit-breaker)
-		if until := lock.Until(); time.Now().After(until) {
-			// Lock expired!
-			dlog.Errorf("%s : LOCK EXPIRE while processing message %s: ", key, msg)
-			break
-		}
 	}
 }
 
@@ -93,7 +124,12 @@ func (d *DistributedEventProcessor) fetchNextEvent(ctx context.Context,
 	if d.AtLeastOnce {
 		return d.RedisClient.LIndex(ctx, ln, 0).Result()
 	}
-	return d.RedisClient.LPop(ctx, ln).Result()
+	// TODO PKD - use BLMove
+	r, err := d.RedisClient.BLPop(ctx, d.EventPollTimeout, ln).Result()
+	if err != nil {
+		return "", err
+	}
+	return r[0], nil
 }
 
 func (d *DistributedEventProcessor) markEventProcessed(ctx context.Context,
