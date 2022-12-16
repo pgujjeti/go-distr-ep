@@ -52,11 +52,12 @@ type DistributedEventProcessor struct {
 	schedulerZset string
 	schedulerLock string
 	schedulerHset string
-	// Pending Keys
-	pKeyList   string
-	pkProcList string
-	// Processing Set
-	psKey string
+	// Pending Keys (shared list by processor)
+	sharedPendingKeyList string
+	// Active Keys Set
+	activeKeyList string
+	// Pending list -> to be processed list (specific to this processor)
+	pkOffloadList string
 	// Consumer id
 	consumerId string
 	// Locker
@@ -103,17 +104,20 @@ func (d *DistributedEventProcessor) validate() error {
 	if d.EventPollTimeout == 0 {
 		d.EventPollTimeout = EVT_POLL_TO
 	}
+	if d.EventPollTimeout > d.LockTTL {
+		return errors.New("event poll timeout greater than lock timeout")
+	}
 	pool := goredis.NewPool(d.RedisClient)
 	d.consumerId = xid.New().String()
 	d.locker = redsync.New(pool)
-	d.pKeyList = fmt.Sprintf("dep:%s:pkeys", d.Namespace)
-	d.pkProcList = fmt.Sprintf("dep:%s:pk-proc", d.Namespace)
+	d.sharedPendingKeyList = fmt.Sprintf("{dep:%s:pk-}pending", d.Namespace)
+	d.pkOffloadList = d.procOffloadListKey(d.consumerId)
+	d.activeKeyList = d.processorSetKey(d.consumerId)
 	d.monitorZset = fmt.Sprintf("dep:%s:mon-zset", d.Namespace)
 	d.monitorLock = fmt.Sprintf("dep:%s:mon-zset:lk", d.Namespace)
 	d.schedulerZset = fmt.Sprintf("dep:%s:sch-zset", d.Namespace)
 	d.schedulerLock = fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace)
 	d.schedulerHset = fmt.Sprintf("dep:%s:sch-hset", d.Namespace)
-	d.psKey = fmt.Sprintf("dep:%s:ps:%s", d.Namespace, d.consumerId)
 	return nil
 }
 
