@@ -19,6 +19,8 @@ const (
 	LIST_TTL       = time.Hour * 24
 	SCHEDULE_DUR   = time.Second * 1
 	EVT_POLL_TO    = time.Second * 3600 * 1
+	// https://redis.io/docs/reference/cluster-spec/#hash-tags
+	PK_HASH_PREFIX = "{dep:%s:pk-}"
 )
 
 // Package global - can do better
@@ -110,7 +112,7 @@ func (d *DistributedEventProcessor) validate() error {
 	pool := goredis.NewPool(d.RedisClient)
 	d.consumerId = xid.New().String()
 	d.locker = redsync.New(pool)
-	d.sharedPendingKeyList = fmt.Sprintf("{dep:%s:pk-}pending", d.Namespace)
+	d.sharedPendingKeyList = fmt.Sprintf(PK_HASH_PREFIX+"pending", d.Namespace)
 	d.pkOffloadList = d.procOffloadListKey(d.consumerId)
 	d.activeKeyList = d.processorSetKey(d.consumerId)
 	d.monitorZset = fmt.Sprintf("dep:%s:mon-zset", d.Namespace)

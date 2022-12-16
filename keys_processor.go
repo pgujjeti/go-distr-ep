@@ -113,5 +113,5 @@ func (d *DistributedEventProcessor) processorSetKey(consumerId string) string {
 }
 
 func (d *DistributedEventProcessor) procOffloadListKey(consumerId string) string {
-	return fmt.Sprintf("{dep:%s:pk-}ol:%s", d.Namespace, consumerId)
+	return fmt.Sprintf(PK_HASH_PREFIX+"ol:%s", d.Namespace, consumerId)
 }
