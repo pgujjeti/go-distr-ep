@@ -58,10 +58,16 @@ func (d *DistributedEventProcessor) eventScheduler() {
 	}
 	cdur := SCHEDULE_DUR
 	ticker := time.NewTicker(cdur)
-	for range ticker.C {
-		dlog.Debugf("consumer %s : checking for scheduled jobs ...", d.consumerId)
-		spj := &schedulePollJob{eventProcessor: d}
-		runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
+	for {
+		select {
+		case <-ticker.C:
+			dlog.Debugf("consumer %s : checking for scheduled jobs ...", d.consumerId)
+			spj := &schedulePollJob{eventProcessor: d}
+			runProtectedJob(d.locker, d.schedulerLock, cdur, spj)
+		case <-d.monitorCh:
+			dlog.Warnf("%s : stopped scheduler monitor", d.consumerId)
+			return
+		}
 	}
 }
 

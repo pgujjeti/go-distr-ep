@@ -12,10 +12,16 @@ func (d *DistributedEventProcessor) monitorKeys() {
 	cdur := d.CleanupDur
 	ticker := time.NewTicker(cdur)
 	spj := &monitorJob{eventProcessor: d}
-	for range ticker.C {
-		d.checkinProcessor()
-		dlog.Debugf("consumer %s : running cleanup ...", d.consumerId)
-		runProtectedJob(d.locker, d.monitorLock, cdur, spj)
+	for {
+		select {
+		case <-ticker.C:
+			d.checkinProcessor()
+			dlog.Debugf("consumer %s : running cleanup ...", d.consumerId)
+			runProtectedJob(d.locker, d.monitorLock, cdur, spj)
+		case <-d.monitorCh:
+			dlog.Warnf("%s : stopped key monitor", d.consumerId)
+			return
+		}
 	}
 }
 

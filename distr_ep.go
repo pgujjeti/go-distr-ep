@@ -70,6 +70,9 @@ type DistributedEventProcessor struct {
 	initialized bool
 	// key consumer cancel fn
 	keyCancelFn context.CancelFunc
+	// monitor channel
+	monitorCh   chan bool
+	schedulerCh chan bool
 }
 
 func (d *DistributedEventProcessor) Init() error {
@@ -79,6 +82,8 @@ func (d *DistributedEventProcessor) Init() error {
 		dlog.Warnf("Validation failed %s", err)
 		return err
 	}
+	d.monitorCh = make(chan bool, 1)
+	d.schedulerCh = make(chan bool, 1)
 	// Start the clean-up goroutine
 	go d.monitorKeys()
 	// Start the scheduler gorouting
@@ -128,14 +133,17 @@ func (d *DistributedEventProcessor) validate() error {
 
 func (d *DistributedEventProcessor) Shutdown() {
 	dlog.Warnf("%s : shutting down processor...", d.consumerId)
-	// TODO handle graceful termination of background go-routines
-	// stop processing new events for active keys
 	// stop pendingKeysConsumer
+	// it stop processing events for active keys
 	if d.keyCancelFn != nil {
 		d.keyCancelFn()
 	}
 	// stop event scheduler
+	if d.Scheduling {
+		d.schedulerCh <- true
+	}
 	// stop monitor process
+	d.monitorCh <- true
 }
 
 func (d *DistributedEventProcessor) AddEvent(e *DistrEvent) error {
