@@ -24,12 +24,17 @@ func (d *DistributedEventProcessor) pendingKey(key string) error {
 // multiple processors shall de-queue from the shared pending key list using Blocking Move
 func (d *DistributedEventProcessor) pendingKeysConsumer() {
 	// run the consumer loop
+	ctx, cancel := context.WithCancel(context.Background())
+	d.keyCancelFn = cancel
 	for {
-		ctx := context.Background()
 		// move from main list to this processor's offload list and delete the item at the end
 		key, err := d.RedisClient.BLMove(ctx, d.sharedPendingKeyList, d.pkOffloadList, REDIS_POS_LEFT,
 			REDIS_POS_RIGHT, 0).Result()
 		// keys, err := d.RedisClient.BLPop(ctx, 0, d.pKeyList).Result()
+		if ctx.Err() != nil {
+			dlog.Warnf("%s : context cancelled: %v", d.consumerId, err)
+			break
+		}
 		if err == redis.Nil {
 			dlog.Debugf("%s : no pending keys; retrying", d.consumerId)
 			continue

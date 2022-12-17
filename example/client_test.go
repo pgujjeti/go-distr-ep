@@ -71,7 +71,6 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 		log.Errorf("error initializing.. %v", err)
 		return
 	}
-
 	// Produce events
 	start_ctr := 1
 	produceMessages(dep, name, start_ctr, no_msgs, msg_delay)
@@ -84,9 +83,10 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 	start_ctr++
 	produceMessages(dep, name, start_ctr, no_msgs, msg_delay)
 	start_ctr += no_msgs
-	lastMessage(dep, name, start_ctr)
-	start_ctr++
-	time.Sleep(time.Second * 10)
+	// lastMessage(dep, name, start_ctr)
+	// start_ctr++
+	time.Sleep(time.Second * 5)
+	dep.Shutdown()
 }
 
 func produceMessages(dep *distr_ep.DistributedEventProcessor, name string, start_ctr int, no_msgs int, msg_delay time.Duration) {

@@ -53,34 +53,37 @@ func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key str
 	d.addKeyToProcessor(ctx, key)
 	d.Callback.StartProcessing(key)
 	// Kick off the event handler as a go-routine
-	go d.runKeyProcessor(key, lock)
+	go d.runKeyProcessor(key, lock, ctx)
 }
 
 // runs a go-routine to process the given key
-func (d *DistributedEventProcessor) runKeyProcessor(key string, lock *redsync.Mutex) {
-	ctx := context.Background()
+func (d *DistributedEventProcessor) runKeyProcessor(key string,
+	lock *redsync.Mutex, ctx context.Context) {
 	ln := d.listNameForKey(key)
-	// Release lock & delete key from processor at the end of the loop
+	// Release key's lock before returning
 	defer func() {
-		// delete the key event list
-		d.RedisClient.Del(ctx, ln)
 		// unlock the key
 		lock.UnlockContext(ctx)
-		// remove the key from processor list
-		d.removeKeyForProcessor(ctx, key)
 	}()
 	// Start consuming messages from the {NS}:evt-str:{key} stream
+	completed := false
 	for {
 		// extend lock before blocking for events
 		lock.ExtendContext(ctx)
 		// Seek the first event (event is removed post-processing)
 		msg, err := d.fetchNextEvent(ctx, ln)
+		if ctx.Err() != nil {
+			dlog.Infof("%s : context cancelled for key %s: %v", d.consumerId, key, err)
+			break
+		}
 		if err == redis.Nil {
+			completed = true
 			dlog.Infof("%s : no items to process for key %s from %s", d.consumerId, key, ln)
 			break
 		}
 		if err != nil {
-			dlog.Errorf("%s : couldnt fetch the first element from %s: %v",
+			completed = true
+			dlog.Errorf("%s : couldnt fetch elements from %s: %v",
 				key, ln, err)
 			break
 		}
@@ -93,10 +96,18 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string, lock *redsync.Mu
 		d.markEventProcessed(ctx, ln, msg)
 		// stop the loop when processing is completed
 		if ejob.completed {
+			completed = true
 			dlog.Infof("%s : key processing completed by processor %s", key, d.consumerId)
 			break
 		}
 	}
+	if completed {
+		// delete the key event list - SKIP
+		// d.RedisClient.Del(ctx, ln)
+		// remove the key from processor list
+		d.removeKeyForProcessor(ctx, key)
+	}
+
 }
 
 func (d *DistributedEventProcessor) fetchNextEvent(ctx context.Context,

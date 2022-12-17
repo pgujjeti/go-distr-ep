@@ -1,6 +1,7 @@
 package distr_ep
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -67,6 +68,8 @@ type DistributedEventProcessor struct {
 	locker *redsync.Redsync
 	// is initialized
 	initialized bool
+	// key consumer cancel fn
+	keyCancelFn context.CancelFunc
 }
 
 func (d *DistributedEventProcessor) Init() error {
@@ -128,6 +131,9 @@ func (d *DistributedEventProcessor) Shutdown() {
 	// TODO handle graceful termination of background go-routines
 	// stop processing new events for active keys
 	// stop pendingKeysConsumer
+	if d.keyCancelFn != nil {
+		d.keyCancelFn()
+	}
 	// stop event scheduler
 	// stop monitor process
 }
