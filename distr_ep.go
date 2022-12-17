@@ -31,7 +31,7 @@ type DistributedEventProcessor struct {
 	Namespace string
 	// redis connection
 	RedisClient *redis.ClusterClient
-	// TTL for lock
+	// key lock duration
 	LockTTL time.Duration
 	// cleanup delay
 	CleanupDur time.Duration
@@ -44,7 +44,8 @@ type DistributedEventProcessor struct {
 	AtLeastOnce bool
 	// Scheduling enabled
 	Scheduling bool
-	// Event polling timeout
+	// Event polling timeout. Time to wait for new events for a key
+	// This should be less than LockTTL
 	EventPollTimeout time.Duration
 
 	// Monitor ZSET
