@@ -76,7 +76,6 @@ func (d *DistributedEventProcessor) Init() error {
 		dlog.Warnf("Validation failed %s", err)
 		return err
 	}
-	// TODO handle graceful termination of background go-routines
 	// Start the clean-up goroutine
 	go d.monitorKeys()
 	// Start the scheduler gorouting
@@ -122,6 +121,15 @@ func (d *DistributedEventProcessor) validate() error {
 	d.schedulerLock = fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace)
 	d.schedulerHset = fmt.Sprintf("dep:%s:sch-hset", d.Namespace)
 	return nil
+}
+
+func (d *DistributedEventProcessor) Shutdown() {
+	dlog.Warnf("%s : shutting down processor...", d.consumerId)
+	// TODO handle graceful termination of background go-routines
+	// stop processing new events for active keys
+	// stop pendingKeysConsumer
+	// stop event scheduler
+	// stop monitor process
 }
 
 func (d *DistributedEventProcessor) AddEvent(e *DistrEvent) error {
