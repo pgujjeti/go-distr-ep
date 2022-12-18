@@ -8,75 +8,76 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func (d *DistributedEventProcessor) monitorKeys() {
-	cdur := d.CleanupDur
-	ticker := time.NewTicker(cdur)
-	for range ticker.C {
-		dlog.Debugf("consumer %s : running cleanup ...", d.consumerId)
-		spj := &monitorJob{eventProcessor: d}
-		runProtectedJob(d.locker, d.monitorLock, cdur, spj)
+// Wrapper for monitor - implements ProtectedJobRunner interface
+type keyMonitor struct {
+	zsetKey  string
+	lockName string
+	dur      time.Duration
+	d        *DistributedEventProcessor
+	pollTask *pollingTask
+}
+
+func (m *keyMonitor) start() {
+	m.pollTask = &pollingTask{
+		dur: m.dur,
+		job: m,
+	}
+	m.pollTask.start()
+}
+
+func (m *keyMonitor) stop() {
+	m.pollTask.stop()
+}
+
+func (m *keyMonitor) runPeriodicJob() {
+	m.checkinProcessor()
+	dlog.Debugf("consumer %s : running cleanup ...", m.d.consumerId)
+	runProtectedJob(m.d.locker, m.lockName, m.dur, m)
+}
+
+func (m *keyMonitor) pollEnded() {
+	dlog.Warnf("%s : stopped key monitor", m.d.consumerId)
+}
+
+func (m *keyMonitor) checkinProcessor() {
+	d := m.d
+	// update this processor's timestamp in ZSET
+	ctx := context.Background()
+	z := &redis.Z{Score: float64(time.Now().UnixMilli()), Member: d.consumerId}
+	if err := d.RedisClient.ZAdd(ctx, m.zsetKey, z).Err(); err != nil {
+		// terminate the processor?
+		dlog.Errorf("%s : could not checkin the processor", d.consumerId)
 	}
 }
 
-// Wrapper for monitor - implements ProtectedJobRunner interface
-type monitorJob struct {
-	eventProcessor *DistributedEventProcessor
-}
-
-func (m *monitorJob) runJob(ch chan bool) {
+func (m *keyMonitor) runJob(ch chan bool) {
 	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
-	m.eventProcessor.checkKeys(context.Background())
+	m.checkProcessors(context.Background())
 }
 
-func (d *DistributedEventProcessor) checkKeys(ctx context.Context) {
+// Run the checker to see if a processor is dead
+func (m *keyMonitor) checkProcessors(ctx context.Context) {
+	d := m.d
 	// Check ZSet for scores < current-time
-	c_time := time.Now().UnixMilli()
+	c_time := time.Now().Add(time.Duration(-3) * d.CleanupDur).UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
-	dlog.Infof("consumer %s : checking for keys before %s", d.consumerId, c_time_str)
+	dlog.Infof("consumer %s : checking for processors before %s", d.consumerId, c_time_str)
 	zrb := &redis.ZRangeBy{
 		Max: c_time_str,
 	}
-	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, d.monitorZset, zrb).Result()
+	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, m.zsetKey, zrb).Result()
 	if err != nil {
 		dlog.Warnf("consumer %s : could not run zrangebyscore %v", d.consumerId, err)
 		return
 	}
 	for _, rz := range ra {
-		key := rz.Member.(string)
-		dlog.Debugf("checking key %s with expiry %s", key, rz.Score)
-		// Check the key-stream for unprocessed/in-process msgs
-		unprocessed_msg := d.unprocessedMessages(ctx, key)
-		if unprocessed_msg {
-			// Renews the check-TTL and launches the key-processor
-			d.keyEventHandler(ctx, key)
-		} else {
-			// no pending msgs - key will cleaned up after the run
-			// delete the stream?
-			dlog.Debugf("key %s shall be deleted from scheduler zset", key)
+		processor := rz.Member.(string)
+		dlog.Warnf("consumer %s expired with last updated time %v", processor, rz.Score)
+		if err := d.keyProcessor.deleteProcessor(processor); err != nil {
+			continue
 		}
+		// remove the processor
+		d.RedisClient.ZRem(ctx, m.zsetKey, processor)
 	}
-	// Delete all items with score < current-time
-	d.RedisClient.ZRemRangeByScore(ctx, d.monitorZset, "0", c_time_str)
-}
-
-func (d *DistributedEventProcessor) unprocessedMessages(ctx context.Context,
-	key string) bool {
-	ln := d.listNameForKey(key)
-	len, err := d.RedisClient.LLen(ctx, ln).Result()
-	dlog.Tracef("%s : %v unprocessed messages in LIST %s", key, len, ln)
-	if err != nil {
-		// error handling
-		dlog.Warnf("%s : couldnt find the length of LIST %s", key, ln)
-		return false
-	}
-	return len > 0
-}
-
-func (d *DistributedEventProcessor) refreshKeyMonitorExpiry(ctx context.Context,
-	key string) {
-	// add this key with an expiry of 2 * LockTTL
-	exp_time := time.Now().Add(d.LockTTL * 2).UnixMilli()
-	d.RedisClient.ZAdd(ctx, d.monitorZset,
-		&redis.Z{Score: float64(exp_time), Member: key})
 }

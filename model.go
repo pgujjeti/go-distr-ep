@@ -6,15 +6,29 @@ import (
 )
 
 type EventCallback interface {
-	ProcessEvent(key string, val interface{})
+	// invoked when start processing
+	StartProcessing(key string)
+	// returns true if this key processing is completed
+	ProcessEvent(key string, val interface{}) bool
 }
 
+type DistrEvent struct {
+	Key   string
+	Val   interface{}
+	Start bool
+}
+
+const (
+	REDIS_POS_LEFT  = "LEFT"
+	REDIS_POS_RIGHT = "RIGHT"
+)
+
 func (d *DistributedEventProcessor) listNameForKey(key string) string {
-	return fmt.Sprintf("%s:evt-ls:%s", d.Namespace, key)
+	return fmt.Sprintf("dep:%s:key-el:%s", d.Namespace, key)
 }
 
 func (d *DistributedEventProcessor) processLockForKey(key string) string {
-	return fmt.Sprintf("%s:pr-lk:%s", d.Namespace, key)
+	return fmt.Sprintf("dep:%s:key-lk:%s", d.Namespace, key)
 }
 
 // utility functions

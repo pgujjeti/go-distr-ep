@@ -13,11 +13,14 @@ import (
 )
 
 const (
-	DEFAULT_LOCK_TTL       = time.Millisecond * 1000
-	DEFAULT_LOCK_RETRY_DUR = time.Millisecond * 100
-	DEFAULT_CLEANUP_DUR    = time.Second * 10
-	DEFAULT_LIST_TTL       = time.Hour * 24
-	DEFAULT_SCHEDULE_DUR   = time.Second * 1
+	LOCK_TTL       = time.Hour * 24
+	LOCK_RETRY_DUR = time.Millisecond * 100
+	CLEANUP_DUR    = time.Second * 10
+	LIST_TTL       = time.Hour * 24
+	SCHEDULE_DUR   = time.Second * 1
+	EVT_POLL_TO    = time.Second * 3600 * 1
+	// https://redis.io/docs/reference/cluster-spec/#hash-tags
+	PK_HASH_PREFIX = "{dep:%s:pk-}"
 )
 
 // Package global - can do better
@@ -28,7 +31,7 @@ type DistributedEventProcessor struct {
 	Namespace string
 	// redis connection
 	RedisClient *redis.ClusterClient
-	// TTL for lock
+	// key lock duration
 	LockTTL time.Duration
 	// cleanup delay
 	CleanupDur time.Duration
@@ -41,17 +44,17 @@ type DistributedEventProcessor struct {
 	AtLeastOnce bool
 	// Scheduling enabled
 	Scheduling bool
+	// Event polling timeout. Time to wait for new events for a key
+	// This should be less than LockTTL
+	EventPollTimeout time.Duration
 
-	// Group name
-	groupName string
 	// Monitor ZSET
-	monitorZset string
-	monitorLock string
+	keyMonitor *keyMonitor
 	// Scheduler
-	schedulerZset string
-	schedulerLock string
-	schedulerHset string
-	// Consumer id
+	eventScheduler *eventScheduler
+	// keyProcessor
+	keyProcessor *keyProcessor
+	// Consumer Id
 	consumerId string
 	// Locker
 	locker *redsync.Redsync
@@ -66,11 +69,12 @@ func (d *DistributedEventProcessor) Init() error {
 		dlog.Warnf("Validation failed %s", err)
 		return err
 	}
-	// TODO handle graceful termination of background go-routines
 	// Start the clean-up goroutine
-	go d.monitorKeys()
+	d.keyMonitor.start()
 	// Start the scheduler gorouting
-	go d.eventScheduler()
+	d.eventScheduler.start()
+	// Start the Pending Key processor
+	d.keyProcessor.start()
 	d.initialized = true
 	return nil
 }
@@ -87,41 +91,71 @@ func (d *DistributedEventProcessor) validate() error {
 		return errors.New("redis client is required")
 	}
 	if d.LockTTL == 0 {
-		d.LockTTL = DEFAULT_LOCK_TTL
+		d.LockTTL = LOCK_TTL
 	}
 	if d.CleanupDur == 0 {
-		d.CleanupDur = DEFAULT_CLEANUP_DUR
+		d.CleanupDur = CLEANUP_DUR
+	}
+	if d.EventPollTimeout == 0 {
+		d.EventPollTimeout = EVT_POLL_TO
+	}
+	if d.EventPollTimeout > d.LockTTL {
+		return errors.New("event poll timeout greater than lock timeout")
 	}
 	pool := goredis.NewPool(d.RedisClient)
-	d.locker = redsync.New(pool)
-	d.groupName = fmt.Sprintf("%s-cg", d.Namespace)
-	d.monitorZset = fmt.Sprintf("%s:mon-zset", d.Namespace)
-	d.monitorLock = fmt.Sprintf("%s:mon-zset:lk", d.Namespace)
-	d.schedulerZset = fmt.Sprintf("%s:sch-zset", d.Namespace)
-	d.schedulerLock = fmt.Sprintf("%s:sch-zset:lk", d.Namespace)
-	d.schedulerHset = fmt.Sprintf("%s:sch-hset", d.Namespace)
 	d.consumerId = xid.New().String()
+	d.locker = redsync.New(pool)
+	d.keyMonitor = &keyMonitor{
+		dur:      d.CleanupDur,
+		d:        d,
+		zsetKey:  fmt.Sprintf("dep:%s:mon-zset", d.Namespace),
+		lockName: fmt.Sprintf("dep:%s:mon-zset:lk", d.Namespace),
+	}
+	d.eventScheduler = &eventScheduler{
+		enabled:  d.Scheduling,
+		dur:      SCHEDULE_DUR,
+		d:        d,
+		zsetKey:  fmt.Sprintf("dep:%s:sch-zset", d.Namespace),
+		lockName: fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace),
+		hsetKey:  fmt.Sprintf("dep:%s:sch-hset", d.Namespace),
+	}
+	d.keyProcessor = &keyProcessor{
+		d:                    d,
+		sharedPendingKeyList: fmt.Sprintf(PK_HASH_PREFIX+"pending", d.Namespace),
+		pkOffloadList:        d.procOffloadListKey(d.consumerId),
+		activeKeyList:        d.processorSetKey(d.consumerId),
+	}
 	return nil
 }
 
-func (d *DistributedEventProcessor) AddEvent(key string, val interface{}) error {
-	return d.ScheduleEvent(key, val, 0)
+func (d *DistributedEventProcessor) Shutdown() {
+	dlog.Warnf("%s : shutting down processor...", d.consumerId)
+	// stop pendingKeysConsumer
+	d.keyProcessor.stop()
+	// stop event scheduler
+	d.eventScheduler.stop()
+	// stop monitor process
+	d.keyMonitor.stop()
 }
 
-func (d *DistributedEventProcessor) ScheduleEvent(key string, val interface{},
+func (d *DistributedEventProcessor) AddEvent(e *DistrEvent) error {
+	return d.ScheduleEvent(e, 0)
+}
+
+func (d *DistributedEventProcessor) ScheduleEvent(e *DistrEvent,
 	delay time.Duration) error {
 	if !d.initialized {
 		return errors.New("not-initialized")
 	}
-	if key == "" {
+	if e.Key == "" {
 		return errors.New("key cant be empty")
 	}
-	if val == nil {
+	if e.Val == nil {
 		return errors.New("val is nil")
 	}
 	if delay > 0 {
-		return d.scheduleEvent(key, val, delay)
+		return d.eventScheduler.scheduleEvent(e, delay)
 	}
 	// run the event now
-	return d.runEvent(key, val)
+	return d.runEvent(e)
 }
