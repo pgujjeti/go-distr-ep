@@ -39,14 +39,16 @@ func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key str
 	// processing client/thread might have completed message processing loop and
 	// is about to release the key-lock
 	// Obtain EVENT_LOCK to {NS}:proc-lock:{key}, with TTL
-	lock := d.locker.NewMutex(d.processLockForKey(key),
+	pl_key := d.processLockForKey(key)
+	lock := d.locker.NewMutex(pl_key,
 		redsync.WithExpiry(d.LockTTL),
 		redsync.WithRetryDelay(LOCK_RETRY_DUR),
 		redsync.WithTries(1),
 	)
 	// If lock cant be obtained, return
 	if err := lock.LockContext(ctx); err != nil {
-		dlog.Debugf("Client %s couldnt obtain lock for key %s: %v", d.consumerId, key, err)
+		dlog.Infof("Client %s couldnt obtain lock %s for key %s: %v",
+			d.consumerId, pl_key, key, err)
 		return
 	}
 	// add this key to this processor's active list
@@ -63,6 +65,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string,
 	// Release key's lock before returning
 	defer func() {
 		// unlock the key
+		// TODO PKD : check this context; might be invalid
 		lock.UnlockContext(ctx)
 	}()
 	// Start consuming messages from the {NS}:evt-str:{key} stream
@@ -102,6 +105,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string,
 		}
 	}
 	if completed {
+		dlog.Infof("%s : cleaning up key %s", d.consumerId, key)
 		// delete the key event list - SKIP
 		// d.RedisClient.Del(ctx, ln)
 		// remove the key from processor list

@@ -91,14 +91,14 @@ func (d *DistributedEventProcessor) reprocessKeysFromList(consumerId, ps_key str
 		// access the first key
 		key, err := d.RedisClient.LIndex(ctx, ps_key, 0).Result()
 		if err == redis.Nil {
-			dlog.Infof("No keys to hand off for processor %s", consumerId)
+			dlog.Infof("No keys to hand off for processor %s from list %s", consumerId, ps_key)
 			return nil
 		}
 		if err != nil {
-			dlog.Errorf("%s : Error while fetching keys %v", consumerId, err)
+			dlog.Errorf("%s : Error while fetching keys from %s: %v", consumerId, ps_key, err)
 			return err
 		}
-		dlog.Infof("processor %s is handling key: %v", consumerId, key)
+		dlog.Infof("processor %s is handling key: %s from list %s", consumerId, key, ps_key)
 		d.reprocessKey(key)
 		// remove the key (the first element)
 		err = d.RedisClient.LPop(ctx, ps_key).Err()
@@ -107,10 +107,13 @@ func (d *DistributedEventProcessor) reprocessKeysFromList(consumerId, ps_key str
 }
 
 func (d *DistributedEventProcessor) reprocessKey(key string) {
-	d.pendingKey(key)
+	dlog.Infof("%s : reprocessing the key %s", d.consumerId, key)
 	// delete the lock
-	lock := d.locker.NewMutex(d.processLockForKey(key))
-	lock.Unlock()
+	pl_key := d.processLockForKey(key)
+	ctx := context.Background()
+	r, err := d.RedisClient.Del(ctx, pl_key).Result()
+	dlog.Debugf("Deleted lock %s for key %s: %s; %v", pl_key, key, r, err)
+	d.pendingKey(key)
 }
 
 func (d *DistributedEventProcessor) processorSetKey(consumerId string) string {

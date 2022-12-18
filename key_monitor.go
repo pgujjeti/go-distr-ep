@@ -8,46 +8,57 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func (d *DistributedEventProcessor) monitorKeys() {
-	cdur := d.CleanupDur
-	ticker := time.NewTicker(cdur)
-	spj := &monitorJob{eventProcessor: d}
-	for {
-		select {
-		case <-ticker.C:
-			d.checkinProcessor()
-			dlog.Debugf("consumer %s : running cleanup ...", d.consumerId)
-			runProtectedJob(d.locker, d.monitorLock, cdur, spj)
-		case <-d.monitorCh:
-			dlog.Warnf("%s : stopped key monitor", d.consumerId)
-			return
-		}
-	}
+// Wrapper for monitor - implements ProtectedJobRunner interface
+type keyMonitor struct {
+	zsetKey  string
+	lockName string
+	dur      time.Duration
+	d        *DistributedEventProcessor
+	pollTask *pollingTask
 }
 
-func (d *DistributedEventProcessor) checkinProcessor() {
+func (m *keyMonitor) start() {
+	m.pollTask = &pollingTask{
+		dur: m.dur,
+		job: m,
+	}
+	m.pollTask.start()
+}
+
+func (m *keyMonitor) stop() {
+	m.pollTask.stop()
+}
+
+func (m *keyMonitor) runPeriodicJob() {
+	m.checkinProcessor()
+	dlog.Debugf("consumer %s : running cleanup ...", m.d.consumerId)
+	runProtectedJob(m.d.locker, m.lockName, m.dur, m)
+}
+
+func (m *keyMonitor) pollEnded() {
+	dlog.Warnf("%s : stopped key monitor", m.d.consumerId)
+}
+
+func (m *keyMonitor) checkinProcessor() {
+	d := m.d
 	// update this processor's timestamp in ZSET
 	ctx := context.Background()
 	z := &redis.Z{Score: float64(time.Now().UnixMilli()), Member: d.consumerId}
-	if err := d.RedisClient.ZAdd(ctx, d.monitorZset, z).Err(); err != nil {
+	if err := d.RedisClient.ZAdd(ctx, m.zsetKey, z).Err(); err != nil {
 		// terminate the processor?
 		dlog.Errorf("%s : could not checkin the processor", d.consumerId)
 	}
 }
 
-// Wrapper for monitor - implements ProtectedJobRunner interface
-type monitorJob struct {
-	eventProcessor *DistributedEventProcessor
-}
-
-func (m *monitorJob) runJob(ch chan bool) {
+func (m *keyMonitor) runJob(ch chan bool) {
 	// indicate that polling completed at the end of the routine
 	defer channelDone(ch, true)
-	m.eventProcessor.checkProcessors(context.Background())
+	m.checkProcessors(context.Background())
 }
 
 // Run the checker to see if a processor is dead
-func (d *DistributedEventProcessor) checkProcessors(ctx context.Context) {
+func (m *keyMonitor) checkProcessors(ctx context.Context) {
+	d := m.d
 	// Check ZSet for scores < current-time
 	c_time := time.Now().Add(time.Duration(-3) * d.CleanupDur).UnixMilli()
 	c_time_str := fmt.Sprintf("%v", c_time)
@@ -55,20 +66,18 @@ func (d *DistributedEventProcessor) checkProcessors(ctx context.Context) {
 	zrb := &redis.ZRangeBy{
 		Max: c_time_str,
 	}
-	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, d.monitorZset, zrb).Result()
+	ra, err := d.RedisClient.ZRangeByScoreWithScores(ctx, m.zsetKey, zrb).Result()
 	if err != nil {
 		dlog.Warnf("consumer %s : could not run zrangebyscore %v", d.consumerId, err)
 		return
 	}
 	for _, rz := range ra {
 		processor := rz.Member.(string)
-		dlog.Warnf("consumer %s expired with last updated time %s", processor, rz.Score)
+		dlog.Warnf("consumer %s expired with last updated time %v", processor, rz.Score)
 		if err := d.deleteProcessor(processor); err != nil {
 			continue
 		}
 		// remove the processor
-		d.RedisClient.ZRem(ctx, d.monitorZset, processor)
+		d.RedisClient.ZRem(ctx, m.zsetKey, processor)
 	}
-	// Delete all processor with score < current-time
-	d.RedisClient.ZRemRangeByScore(ctx, d.monitorZset, "0", c_time_str)
 }

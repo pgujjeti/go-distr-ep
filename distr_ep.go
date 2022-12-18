@@ -50,12 +50,9 @@ type DistributedEventProcessor struct {
 	EventPollTimeout time.Duration
 
 	// Monitor ZSET
-	monitorZset string
-	monitorLock string
+	keyMonitor *keyMonitor
 	// Scheduler
-	schedulerZset string
-	schedulerLock string
-	schedulerHset string
+	eventScheduler *eventScheduler
 	// Pending Keys (shared list by processor)
 	sharedPendingKeyList string
 	// Active Keys Set
@@ -70,9 +67,6 @@ type DistributedEventProcessor struct {
 	initialized bool
 	// key consumer cancel fn
 	keyCancelFn context.CancelFunc
-	// monitor channel
-	monitorCh   chan bool
-	schedulerCh chan bool
 }
 
 func (d *DistributedEventProcessor) Init() error {
@@ -82,12 +76,10 @@ func (d *DistributedEventProcessor) Init() error {
 		dlog.Warnf("Validation failed %s", err)
 		return err
 	}
-	d.monitorCh = make(chan bool, 1)
-	d.schedulerCh = make(chan bool, 1)
 	// Start the clean-up goroutine
-	go d.monitorKeys()
+	d.keyMonitor.start()
 	// Start the scheduler gorouting
-	go d.eventScheduler()
+	d.eventScheduler.start()
 	// Start the Pending Key processor
 	go d.pendingKeysConsumer()
 	d.initialized = true
@@ -123,11 +115,20 @@ func (d *DistributedEventProcessor) validate() error {
 	d.sharedPendingKeyList = fmt.Sprintf(PK_HASH_PREFIX+"pending", d.Namespace)
 	d.pkOffloadList = d.procOffloadListKey(d.consumerId)
 	d.activeKeyList = d.processorSetKey(d.consumerId)
-	d.monitorZset = fmt.Sprintf("dep:%s:mon-zset", d.Namespace)
-	d.monitorLock = fmt.Sprintf("dep:%s:mon-zset:lk", d.Namespace)
-	d.schedulerZset = fmt.Sprintf("dep:%s:sch-zset", d.Namespace)
-	d.schedulerLock = fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace)
-	d.schedulerHset = fmt.Sprintf("dep:%s:sch-hset", d.Namespace)
+	d.keyMonitor = &keyMonitor{
+		dur:      d.CleanupDur,
+		d:        d,
+		zsetKey:  fmt.Sprintf("dep:%s:mon-zset", d.Namespace),
+		lockName: fmt.Sprintf("dep:%s:mon-zset:lk", d.Namespace),
+	}
+	d.eventScheduler = &eventScheduler{
+		enabled:  d.Scheduling,
+		dur:      SCHEDULE_DUR,
+		d:        d,
+		zsetKey:  fmt.Sprintf("dep:%s:sch-zset", d.Namespace),
+		lockName: fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace),
+		hsetKey:  fmt.Sprintf("dep:%s:sch-hset", d.Namespace),
+	}
 	return nil
 }
 
@@ -139,11 +140,9 @@ func (d *DistributedEventProcessor) Shutdown() {
 		d.keyCancelFn()
 	}
 	// stop event scheduler
-	if d.Scheduling {
-		d.schedulerCh <- true
-	}
+	d.eventScheduler.stop()
 	// stop monitor process
-	d.monitorCh <- true
+	d.keyMonitor.stop()
 }
 
 func (d *DistributedEventProcessor) AddEvent(e *DistrEvent) error {
@@ -162,7 +161,7 @@ func (d *DistributedEventProcessor) ScheduleEvent(e *DistrEvent,
 		return errors.New("val is nil")
 	}
 	if delay > 0 {
-		return d.scheduleEvent(e, delay)
+		return d.eventScheduler.scheduleEvent(e, delay)
 	}
 	// run the event now
 	return d.runEvent(e)
