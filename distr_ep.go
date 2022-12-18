@@ -1,7 +1,6 @@
 package distr_ep
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -53,20 +52,14 @@ type DistributedEventProcessor struct {
 	keyMonitor *keyMonitor
 	// Scheduler
 	eventScheduler *eventScheduler
-	// Pending Keys (shared list by processor)
-	sharedPendingKeyList string
-	// Active Keys Set
-	activeKeyList string
-	// Pending list -> to be processed list (specific to this processor)
-	pkOffloadList string
-	// Consumer id
+	// keyProcessor
+	keyProcessor *keyProcessor
+	// Consumer Id
 	consumerId string
 	// Locker
 	locker *redsync.Redsync
 	// is initialized
 	initialized bool
-	// key consumer cancel fn
-	keyCancelFn context.CancelFunc
 }
 
 func (d *DistributedEventProcessor) Init() error {
@@ -81,7 +74,7 @@ func (d *DistributedEventProcessor) Init() error {
 	// Start the scheduler gorouting
 	d.eventScheduler.start()
 	// Start the Pending Key processor
-	go d.pendingKeysConsumer()
+	d.keyProcessor.start()
 	d.initialized = true
 	return nil
 }
@@ -112,9 +105,6 @@ func (d *DistributedEventProcessor) validate() error {
 	pool := goredis.NewPool(d.RedisClient)
 	d.consumerId = xid.New().String()
 	d.locker = redsync.New(pool)
-	d.sharedPendingKeyList = fmt.Sprintf(PK_HASH_PREFIX+"pending", d.Namespace)
-	d.pkOffloadList = d.procOffloadListKey(d.consumerId)
-	d.activeKeyList = d.processorSetKey(d.consumerId)
 	d.keyMonitor = &keyMonitor{
 		dur:      d.CleanupDur,
 		d:        d,
@@ -129,16 +119,19 @@ func (d *DistributedEventProcessor) validate() error {
 		lockName: fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace),
 		hsetKey:  fmt.Sprintf("dep:%s:sch-hset", d.Namespace),
 	}
+	d.keyProcessor = &keyProcessor{
+		d:                    d,
+		sharedPendingKeyList: fmt.Sprintf(PK_HASH_PREFIX+"pending", d.Namespace),
+		pkOffloadList:        d.procOffloadListKey(d.consumerId),
+		activeKeyList:        d.processorSetKey(d.consumerId),
+	}
 	return nil
 }
 
 func (d *DistributedEventProcessor) Shutdown() {
 	dlog.Warnf("%s : shutting down processor...", d.consumerId)
 	// stop pendingKeysConsumer
-	// it stop processing events for active keys
-	if d.keyCancelFn != nil {
-		d.keyCancelFn()
-	}
+	d.keyProcessor.stop()
 	// stop event scheduler
 	d.eventScheduler.stop()
 	// stop monitor process

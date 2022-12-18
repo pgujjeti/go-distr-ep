@@ -17,7 +17,7 @@ func (d *DistributedEventProcessor) runEvent(e *DistrEvent) error {
 	// add to Pending Keys list, if its a start event
 	if e.Start {
 		// atomic op, along with insertion into key's event list?
-		d.pendingKey(e.Key)
+		d.keyProcessor.pendingKey(e.Key)
 	}
 	// Add new events to the end of the list
 	r, err := d.RedisClient.RPush(ctx, ln, e.Val).Result()
@@ -52,7 +52,7 @@ func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key str
 		return
 	}
 	// add this key to this processor's active list
-	d.addKeyToProcessor(ctx, key)
+	d.keyProcessor.addKeyToProcessor(ctx, key)
 	d.Callback.StartProcessing(key)
 	// Kick off the event handler as a go-routine
 	go d.runKeyProcessor(key, lock, ctx)
@@ -109,7 +109,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string,
 		// delete the key event list - SKIP
 		// d.RedisClient.Del(ctx, ln)
 		// remove the key from processor list
-		d.removeKeyForProcessor(ctx, key)
+		d.keyProcessor.removeKeyForProcessor(ctx, key)
 	}
 
 }

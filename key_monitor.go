@@ -74,7 +74,7 @@ func (m *keyMonitor) checkProcessors(ctx context.Context) {
 	for _, rz := range ra {
 		processor := rz.Member.(string)
 		dlog.Warnf("consumer %s expired with last updated time %v", processor, rz.Score)
-		if err := d.deleteProcessor(processor); err != nil {
+		if err := d.keyProcessor.deleteProcessor(processor); err != nil {
 			continue
 		}
 		// remove the processor
