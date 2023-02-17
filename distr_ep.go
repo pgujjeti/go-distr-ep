@@ -13,12 +13,11 @@ import (
 )
 
 const (
-	LOCK_TTL       = time.Hour * 24
+	LOCK_TTL       = time.Hour * 2
 	LOCK_RETRY_DUR = time.Millisecond * 100
 	CLEANUP_DUR    = time.Second * 10
 	LIST_TTL       = time.Hour * 24
 	SCHEDULE_DUR   = time.Second * 1
-	EVT_POLL_TO    = time.Second * 3600 * 1
 	// https://redis.io/docs/reference/cluster-spec/#hash-tags
 	PK_HASH_PREFIX = "{dep:%s:pk-}"
 )
@@ -97,10 +96,10 @@ func (d *DistributedEventProcessor) validate() error {
 		d.CleanupDur = CLEANUP_DUR
 	}
 	if d.EventPollTimeout == 0 {
-		d.EventPollTimeout = EVT_POLL_TO
+		d.EventPollTimeout = d.LockTTL / 2
 	}
-	if d.EventPollTimeout > d.LockTTL {
-		return errors.New("event poll timeout greater than lock timeout")
+	if d.EventPollTimeout > d.LockTTL/2 {
+		return errors.New("event poll timeout should be <= (lock TTL)/2")
 	}
 	pool := goredis.NewPool(d.RedisClient)
 	d.consumerId = xid.New().String()
