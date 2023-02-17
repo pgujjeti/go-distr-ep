@@ -53,7 +53,6 @@ func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key str
 	}
 	// add this key to this processor's active list
 	d.keyProcessor.addKeyToProcessor(ctx, key)
-	d.Callback.StartProcessing(key)
 	// Kick off the event handler as a go-routine
 	go d.runKeyProcessor(key, lock, ctx)
 }
@@ -70,6 +69,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string,
 	}()
 	// Start consuming messages from the {NS}:evt-str:{key} stream
 	completed := false
+	start := true
 	for {
 		// extend lock before blocking for events
 		lock.ExtendContext(ctx)
@@ -94,9 +94,11 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string,
 			eventProcessor: d,
 			key:            key,
 			val:            msg,
+			start:          start,
 		}
 		runProtectedJobWithLock(lock, d.LockTTL, ejob)
 		d.markEventProcessed(ctx, ln, msg)
+		start = false
 		// stop the loop when processing is completed
 		if ejob.completed {
 			completed = true
@@ -149,6 +151,7 @@ type eventProcessorJob struct {
 	eventProcessor *DistributedEventProcessor
 	key            string
 	val            string
+	start          bool
 	completed      bool
 }
 
@@ -158,5 +161,5 @@ func (e *eventProcessorJob) runJob(ch chan bool) {
 	defer timeExecution(time.Now(), fmt.Sprintf("%s:event", e.key))
 	d := e.eventProcessor
 	// Invoke process event callback
-	e.completed = d.Callback.ProcessEvent(e.key, e.val)
+	e.completed = d.Callback.ProcessEvent(e.key, e.val, e.start)
 }

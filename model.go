@@ -6,10 +6,8 @@ import (
 )
 
 type EventCallback interface {
-	// invoked when start processing
-	StartProcessing(key string)
 	// returns true if this key processing is completed
-	ProcessEvent(key string, val interface{}) bool
+	ProcessEvent(key string, val interface{}, start bool) bool
 }
 
 type DistrEvent struct {

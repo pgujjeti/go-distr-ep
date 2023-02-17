@@ -19,11 +19,10 @@ type TestCallbackImpl struct {
 	callbackName string
 }
 
-func (t *TestCallbackImpl) StartProcessing(key string) {
-	log.Infof("Start Processing %s", key)
-}
-
-func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}) bool {
+func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}, start bool) bool {
+	if start {
+		log.Infof("Start Processing %s", key)
+	}
 	// process event
 	log.Infof("(%s) %s : processing event : %+v", t.callbackName, key, val)
 	time.Sleep(10 * time.Millisecond)
@@ -40,17 +39,17 @@ type TestMessage struct {
 
 func TestRun1(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	log.Info("Running test")
-	no_clients, no_msgs := 10, 10
+	log.Info("Running test1")
+	no_clients, no_msgs := 2, 10
 	msg_delay := time.Millisecond * 400
 	for i := 1; i <= no_clients; i++ {
 		cname := fmt.Sprintf("client %v", i)
-		go startClient(cname, no_msgs, msg_delay)
+		go startClient(cname, no_msgs, msg_delay, i == 1)
 	}
 	time.Sleep((time.Second * 10) + (time.Duration(no_msgs) * msg_delay))
 }
 
-func startClient(name string, no_msgs int, msg_delay time.Duration) {
+func startClient(name string, no_msgs int, msg_delay time.Duration, sendLastMsg bool) {
 	client := redis.NewClusterClient(&redis.ClusterOptions{
 		Addrs: []string{"localhost:7000"},
 	})
@@ -60,8 +59,8 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 	dep := &distr_ep.DistributedEventProcessor{
 		RedisClient: client,
 		Namespace:   "test1",
-		// LockTTL:     time.Second * 1000,
-		CleanupDur:  time.Second * 1,
+		LockTTL:     time.Second * 1000,
+		CleanupDur:  time.Second * 2,
 		Callback:    callbackImpl,
 		LogLevel:    log.InfoLevel,
 		AtLeastOnce: true,
@@ -83,7 +82,9 @@ func startClient(name string, no_msgs int, msg_delay time.Duration) {
 	start_ctr++
 	produceMessages(dep, name, start_ctr, no_msgs, msg_delay)
 	start_ctr += no_msgs
-	// lastMessage(dep, name, start_ctr)
+	if sendLastMsg {
+		lastMessage(dep, name, start_ctr)
+	}
 	// start_ctr++
 	time.Sleep(time.Second * 5)
 	dep.Shutdown()
