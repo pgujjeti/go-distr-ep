@@ -22,11 +22,12 @@ type TestCallbackImpl struct {
 	callbackName string
 }
 
-func (t *TestCallbackImpl) StartProcessing(key string) {
-	// start key processing - initialize things like cache, etc that you need
-}
+func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}, start bool) bool {
+	if start {
+		// start key processing - initialize things like cache, etc that you need
+		log.Infof("Start Processing %s", key)
+	}
 
-func (t *TestCallbackImpl) ProcessEvent(key string, val interface{}) bool {
 	// process event
 	return false
 	// return true when processing is completed for this key
