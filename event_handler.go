@@ -2,11 +2,16 @@ package distr_ep
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/go-redsync/redsync/v4"
+)
+
+var (
+	ErrTimeout = errors.New("op timeout")
 )
 
 func (d *DistributedEventProcessor) runEvent(e *DistrEvent) error {
@@ -15,6 +20,7 @@ func (d *DistributedEventProcessor) runEvent(e *DistrEvent) error {
 	key := e.Key
 	ln := d.listNameForKey(key)
 	// add to Pending Keys list, if its a start event
+	// TODO - optimize so that no explicit start is required
 	if e.Start {
 		// atomic op, along with insertion into key's event list?
 		d.keyProcessor.pendingKey(e.Key)
@@ -122,17 +128,49 @@ func (d *DistributedEventProcessor) fetchNextEvent(ctx context.Context,
 	// If atleast-once semantics are set, peek the message. The message shall be
 	// popped at the end of event processing in markEventProcessed()
 	if d.AtLeastOnce {
-		// use BLMove with the same source & dest
-		// - effectively leaving the item in place
-		return d.RedisClient.BLMove(ctx, ln, ln, REDIS_POS_LEFT,
-			REDIS_POS_LEFT, d.EventPollTimeout).Result()
+		return d.peekElement(ctx, ln)
 	}
-	r, err := d.RedisClient.BLPop(ctx, d.EventPollTimeout, ln).Result()
-	if err != nil {
-		return "", err
+	return d.popElement(ctx, ln)
+}
+
+func (d *DistributedEventProcessor) popElement(ctx context.Context,
+	ln string) (string, error) {
+	for t := time.Duration(0); t < d.EventPollTimeout; {
+		r, err := d.RedisClient.LPop(ctx, ln).Result()
+		switch err {
+		case nil:
+			return r, nil
+		case redis.Nil:
+		default:
+			return "", err
+		}
+		t += d.eventPollDuration
+		time.Sleep(d.eventPollDuration)
 	}
-	// BLPop returns key, member
-	return r[1], nil
+	return "", ErrTimeout
+	// TODO BLOCKING implementation
+	// r, err := d.RedisClient.BLPop(ctx, d.EventPollTimeout, ln).Result()
+	// if err != nil {
+	// 	return "", err
+	// }
+	// return r[1], nil
+}
+
+func (d *DistributedEventProcessor) peekElement(ctx context.Context,
+	ln string) (string, error) {
+	for t := time.Duration(0); t < d.EventPollTimeout; {
+		r, err := d.RedisClient.LIndex(ctx, ln, 0).Result()
+		switch err {
+		case nil:
+			return r, nil
+		case redis.Nil:
+		default:
+			return "", err
+		}
+		t += d.eventPollDuration
+		time.Sleep(d.eventPollDuration)
+	}
+	return "", ErrTimeout
 }
 
 func (d *DistributedEventProcessor) markEventProcessed(ctx context.Context,

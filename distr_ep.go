@@ -19,7 +19,8 @@ const (
 	LIST_TTL       = time.Hour * 24
 	SCHEDULE_DUR   = time.Second * 1
 	// https://redis.io/docs/reference/cluster-spec/#hash-tags
-	PK_HASH_PREFIX = "{dep:%s:pk-}"
+	PK_HASH_PREFIX    = "{dep:%s:pk-}"
+	EVT_POLL_DURATION = time.Millisecond * 10
 )
 
 // Package global - can do better
@@ -59,6 +60,8 @@ type DistributedEventProcessor struct {
 	locker *redsync.Redsync
 	// is initialized
 	initialized bool
+	// event poll duration
+	eventPollDuration time.Duration
 }
 
 func (d *DistributedEventProcessor) Init() error {
@@ -101,6 +104,7 @@ func (d *DistributedEventProcessor) validate() error {
 	if d.EventPollTimeout > d.LockTTL/2 {
 		return errors.New("event poll timeout should be <= (lock TTL)/2")
 	}
+	d.eventPollDuration = EVT_POLL_DURATION
 	pool := goredis.NewPool(d.RedisClient)
 	d.consumerId = xid.New().String()
 	d.locker = redsync.New(pool)
