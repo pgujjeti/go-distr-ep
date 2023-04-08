@@ -103,6 +103,7 @@ func (k *keyProcessor) removeKeyForProcessor(ctx context.Context, key string) er
 }
 
 func (k *keyProcessor) deleteProcessor(consumerId string) error {
+	dlog.Warnf("Deleting consumer %s...", consumerId)
 	d := k.d
 	// * Get the list of active KEY_IDs
 	// * For each KEY_ID
@@ -111,6 +112,10 @@ func (k *keyProcessor) deleteProcessor(consumerId string) error {
 	if err := k.reprocessKeysFromList(consumerId, d.processorSetKey(consumerId)); err != nil {
 		return err
 	}
+	// delete the processor events list
+	evt_ln := d.processorEventsListName(consumerId)
+	dlog.Infof("Deleting events list %s for consumer %s", evt_ln, consumerId)
+	d.RedisClient.Del(context.Background(), evt_ln)
 	return nil
 }
 
@@ -144,7 +149,6 @@ func (k *keyProcessor) reprocessKey(key string) {
 	ctx := context.Background()
 	r, err := d.RedisClient.Del(ctx, pl_key).Result()
 	dlog.Debugf("Deleted lock %s for key %s: %s; %v", pl_key, key, r, err)
-	// TODO NAFF: (double check)
 	// run key handler
 	d.keyEventHandler(ctx, key)
 }
