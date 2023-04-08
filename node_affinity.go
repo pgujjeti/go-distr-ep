@@ -3,6 +3,7 @@ package distr_ep
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -33,8 +34,17 @@ func (d *DistributedEventProcessor) findNodeProcessingKey(
 
 func (d *DistributedEventProcessor) notifyEventForNode(ctx context.Context, node *keyNodeInfo, key string) error {
 	evt_ln := d.processorEventsListName(node.NodeId)
+	if d.nodeMatches(node.NodeId) {
+		// if this is the node, skip the queue & notify directly
+		go d.eventNotifForKey(ctx, key)
+		return nil
+	}
 	dlog.Debugf("%s : sending a notification to node %s", key, evt_ln)
 	return d.RedisClient.RPush(ctx, evt_ln, key).Err()
+}
+
+func (d *DistributedEventProcessor) nodeMatches(nodeId string) bool {
+	return strings.EqualFold(d.consumerId, nodeId)
 }
 
 func (d *DistributedEventProcessor) addNodeProcessingKey(ctx context.Context, key string) error {
@@ -53,6 +63,7 @@ func (d *DistributedEventProcessor) removeNodeProcessingKey(ctx context.Context,
 }
 
 func (d *DistributedEventProcessor) eventNotifForKey(ctx context.Context, key string) {
+	dlog.Debugf("%s : processing event notification", key)
 	rec_to := 20 * time.Millisecond
 	kw := d.keyProcessor.getWrapper(key)
 	submit_job := true
