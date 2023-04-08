@@ -92,12 +92,8 @@ func startClient(name string, no_msgs int, msg_delay time.Duration, sendLastMsg 
 
 func produceMessages(dep *distr_ep.DistributedEventProcessor, name string, start_ctr int, no_msgs int, msg_delay time.Duration) {
 	for i := start_ctr; i < (no_msgs + start_ctr); i++ {
-		var start bool
-		if i == 1 {
-			start = true
-		}
 		msg := createMessage(name, i, false)
-		e := &distr_ep.DistrEvent{Key: SESSION_ID_KEY, Val: msg, Start: start}
+		e := &distr_ep.DistrEvent{Key: SESSION_ID_KEY, Val: msg}
 		queueEvent(dep, e)
 		if msg_delay > 0 {
 			time.Sleep(msg_delay)

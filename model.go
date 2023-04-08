@@ -11,9 +11,8 @@ type EventCallback interface {
 }
 
 type DistrEvent struct {
-	Key   string
-	Val   interface{}
-	Start bool
+	Key string
+	Val interface{}
 }
 
 const (
@@ -27,6 +26,14 @@ func (d *DistributedEventProcessor) listNameForKey(key string) string {
 
 func (d *DistributedEventProcessor) processLockForKey(key string) string {
 	return fmt.Sprintf("dep:%s:key-lk:%s", d.Namespace, key)
+}
+
+func (d *DistributedEventProcessor) processorSetKey(consumerId string) string {
+	return fmt.Sprintf("dep:%s:pk-active:%s", d.Namespace, consumerId)
+}
+
+func (d *DistributedEventProcessor) processorEventsListName(consumerId string) string {
+	return fmt.Sprintf("dep:%s:p-evts:%s", d.Namespace, consumerId)
 }
 
 // utility functions

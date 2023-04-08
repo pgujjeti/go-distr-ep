@@ -31,10 +31,10 @@ type MsgProducer struct {
 	msg_delay  time.Duration
 }
 
-func TestConcurent1(t *testing.T) {
+func TestConcurrent1(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
 	log.Info("Running test1")
-	no_clients, no_producers, no_msgs := 1, 50, 10
+	no_clients, no_producers, no_msgs := 8, 50, 10
 	msg_delay := time.Millisecond * 400
 	msg_ch := make(chan *testMsg)
 
@@ -113,7 +113,7 @@ func (c *ConcClient) ProcessEvent(key string, val interface{}, start bool) bool 
 
 func (c *ConcClient) readMsgs() {
 	for tm := range c.msg_ch {
-		e := &distr_ep.DistrEvent{Key: tm.key, Val: tm.val, Start: tm.start}
+		e := &distr_ep.DistrEvent{Key: tm.key, Val: tm.val}
 		log.Infof("Queueing event: %s", e.Val)
 		c.dep.AddEvent(e)
 	}

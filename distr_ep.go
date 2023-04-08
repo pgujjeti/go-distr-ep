@@ -19,7 +19,8 @@ const (
 	LIST_TTL       = time.Hour * 24
 	SCHEDULE_DUR   = time.Second * 1
 	// https://redis.io/docs/reference/cluster-spec/#hash-tags
-	PK_HASH_PREFIX = "{dep:%s:pk-}"
+	PK_HASH_PREFIX      = "{dep:%s:pk-}"
+	CACHE_KEY_NODE_HSET = "dep:%s:kn-set"
 )
 
 // Package global - can do better
@@ -59,6 +60,8 @@ type DistributedEventProcessor struct {
 	locker *redsync.Redsync
 	// is initialized
 	initialized bool
+	// keys -> node hash set
+	keyToNodeSetName string
 }
 
 func (d *DistributedEventProcessor) Init() error {
@@ -119,11 +122,11 @@ func (d *DistributedEventProcessor) validate() error {
 		hsetKey:  fmt.Sprintf("dep:%s:sch-hset", d.Namespace),
 	}
 	d.keyProcessor = &keyProcessor{
-		d:                    d,
-		sharedPendingKeyList: fmt.Sprintf(PK_HASH_PREFIX+"pending", d.Namespace),
-		pkOffloadList:        d.procOffloadListKey(d.consumerId),
-		activeKeyList:        d.processorSetKey(d.consumerId),
+		d:             d,
+		activeKeyList: d.processorSetKey(d.consumerId),
+		keyEventsList: d.processorEventsListName(d.consumerId),
 	}
+	d.keyToNodeSetName = fmt.Sprintf(CACHE_KEY_NODE_HSET, d.Namespace)
 	return nil
 }
 

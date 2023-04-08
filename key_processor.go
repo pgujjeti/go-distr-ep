@@ -2,23 +2,40 @@ package distr_ep
 
 import (
 	"context"
-	"fmt"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
 
+const (
+	KP_DEFAULT_EVENT_TO = 300 * time.Second
+)
+
 type keyProcessor struct {
 	// Pending Keys (shared list by processor)
-	sharedPendingKeyList string
+	// sharedPendingKeyList string
 	// Active Keys Set
 	activeKeyList string
-	// Pending list -> to be processed list (specific to this processor)
-	pkOffloadList string
-	d             *DistributedEventProcessor
-	keyCancelFn   context.CancelFunc
+	// Notifications about events for keys handled by this node
+	keyEventsList    string
+	d                *DistributedEventProcessor
+	keyCancelFn      context.CancelFunc
+	keysMap          map[string]*keyWrapper
+	eventWaitTimeout time.Duration
+}
+
+type keyWrapper struct {
+	notif_ch chan bool
+	closed   bool
+}
+
+func (k *keyProcessor) getWrapper(key string) *keyWrapper {
+	return k.keysMap[key]
 }
 
 func (k *keyProcessor) start() {
+	k.eventWaitTimeout = KP_DEFAULT_EVENT_TO
+	k.keysMap = map[string]*keyWrapper{}
 	ctx, cancel := context.WithCancel(context.Background())
 	k.keyCancelFn = cancel
 	go k.pendingKeysConsumer(ctx)
@@ -31,29 +48,13 @@ func (k *keyProcessor) stop() {
 	k.keyCancelFn()
 }
 
-func (k *keyProcessor) pendingKey(key string) error {
-	d := k.d
-	ln := k.sharedPendingKeyList
-	ctx := context.Background()
-	// add the key to pending keys
-	r, err := d.RedisClient.RPush(ctx, ln, key).Result()
-	dlog.Infof("%s : add key to pending keys %s result: %v, %v", key, ln, r, err)
-	if err != nil {
-		dlog.Warnf("%s : could not add key to pending keys: %v", key, err)
-		return err
-	}
-	return nil
-}
-
-// consume and run pending keys
-// multiple processors shall de-queue from the shared pending key list using Blocking Move
+// consume events from this node's notif queue
 func (k *keyProcessor) pendingKeysConsumer(ctx context.Context) {
 	d := k.d
 	// run the consumer loop
 	for {
 		// move from main list to this processor's offload list and delete the item at the end
-		key, err := d.RedisClient.BLMove(ctx, k.sharedPendingKeyList, k.pkOffloadList, REDIS_POS_LEFT,
-			REDIS_POS_RIGHT, 0).Result()
+		result, err := d.RedisClient.BLPop(ctx, k.eventWaitTimeout, k.keyEventsList).Result()
 		// keys, err := d.RedisClient.BLPop(ctx, 0, d.pKeyList).Result()
 		if ctx.Err() != nil {
 			dlog.Warnf("%s : context cancelled: %v", d.consumerId, err)
@@ -67,17 +68,20 @@ func (k *keyProcessor) pendingKeysConsumer(ctx context.Context) {
 			dlog.Warnf("%s : fetching pending keys failed.. retrying: %v", d.consumerId, err)
 			continue
 		}
-		dlog.Infof("%s : Processing key: %v", d.consumerId, key)
-		d.keyEventHandler(ctx, key)
-		// delete the key from processor's offload list
-		r, err := d.RedisClient.LTrim(ctx, k.pkOffloadList, 1, 0).Result()
-		dlog.Debugf("%s : deleted item from offload list %s %s : %v", d.consumerId,
-			k.pkOffloadList, r, err)
+		key := result[1]
+		dlog.Debugf("%s : Processing key: %v", d.consumerId, key)
+		go d.eventNotifForKey(ctx, key)
 	}
 }
 
 func (k *keyProcessor) addKeyToProcessor(ctx context.Context, key string) error {
+	k.keysMap[key] = &keyWrapper{
+		notif_ch: make(chan bool),
+		closed:   false,
+	}
 	d := k.d
+	// ADD processing node info for this key
+	d.addNodeProcessingKey(ctx, key)
 	ps_key := k.activeKeyList
 	dlog.Infof("%s : adding key %s to list of keys at %s", d.consumerId, key, ps_key)
 	r, err := d.RedisClient.RPush(ctx, ps_key, key).Result()
@@ -92,6 +96,9 @@ func (k *keyProcessor) removeKeyForProcessor(ctx context.Context, key string) er
 	r, err := d.RedisClient.LRem(ctx, ps_key, 1, key).Result()
 	// r, err := d.RedisClient.SRem(ctx, ps_key, key).Result()
 	dlog.Infof("%s : removed key %s with result %v: %v", d.consumerId, key, r, err)
+	// DELETE node affinity data; watch for race condition
+	d.removeNodeProcessingKey(ctx, key)
+	delete(k.keysMap, key)
 	return err
 }
 
@@ -101,12 +108,7 @@ func (k *keyProcessor) deleteProcessor(consumerId string) error {
 	// * For each KEY_ID
 	// 	* Inject an event into Pending XPK stream
 	// 	* Delete the KEY_ID lock
-	// * Repeat this for keys offloaded from pending keys that were in flight
 	if err := k.reprocessKeysFromList(consumerId, d.processorSetKey(consumerId)); err != nil {
-		return err
-	}
-	// check processor's offload list
-	if err := k.reprocessKeysFromList(consumerId, d.procOffloadListKey(consumerId)); err != nil {
 		return err
 	}
 	return nil
@@ -142,13 +144,7 @@ func (k *keyProcessor) reprocessKey(key string) {
 	ctx := context.Background()
 	r, err := d.RedisClient.Del(ctx, pl_key).Result()
 	dlog.Debugf("Deleted lock %s for key %s: %s; %v", pl_key, key, r, err)
-	k.pendingKey(key)
-}
-
-func (d *DistributedEventProcessor) processorSetKey(consumerId string) string {
-	return fmt.Sprintf("dep:%s:pk-active:%s", d.Namespace, consumerId)
-}
-
-func (d *DistributedEventProcessor) procOffloadListKey(consumerId string) string {
-	return fmt.Sprintf(PK_HASH_PREFIX+"ol:%s", d.Namespace, consumerId)
+	// TODO NAFF: (double check)
+	// run key handler
+	d.keyEventHandler(ctx, key)
 }
