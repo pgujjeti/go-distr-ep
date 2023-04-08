@@ -2,6 +2,7 @@ package example
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -33,8 +34,11 @@ type MsgProducer struct {
 
 func TestConcurrent1(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
+	log.SetFormatter(&log.TextFormatter{
+		TimestampFormat: "2006-01-02T15:04:05.999999Z07:00",
+	})
 	log.Info("Running test1")
-	no_clients, no_producers, no_msgs := 8, 50, 10
+	no_clients, no_producers, no_msgs := 8, 1, 10
 	msg_delay := time.Millisecond * 400
 	msg_ch := make(chan *testMsg)
 
@@ -85,7 +89,7 @@ func createConcurrentClient(name string, msg_ch chan *testMsg) (c *ConcClient) {
 		// LockTTL:     time.Second * 3600,
 		CleanupDur: time.Second * 2,
 		Callback:   c,
-		LogLevel:   log.InfoLevel,
+		LogLevel:   log.DebugLevel,
 		// AtLeastOnce: true,
 		Scheduling: true,
 	}
@@ -138,7 +142,7 @@ func (p *MsgProducer) produce() {
 		}
 		log.Infof("%s : adding message to channel: %s", m.key, m.val)
 		p.msg_ch <- m
-		time.Sleep(p.msg_delay)
+		time.Sleep(time.Duration(rand.Intn(20)) * p.msg_delay / 20)
 	}
 }
 
