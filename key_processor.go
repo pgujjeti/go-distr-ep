@@ -145,7 +145,7 @@ func (k *keyProcessor) reprocessKey(key string) {
 	d := k.d
 	dlog.Infof("%s : reprocessing the key %s", d.consumerId, key)
 	// delete the lock
-	pl_key := d.processLockForKey(key)
+	pl_key := d.lockNameForKey(key)
 	ctx := context.Background()
 	r, err := d.RedisClient.Del(ctx, pl_key).Result()
 	dlog.Debugf("Deleted lock %s for key %s: %s; %v", pl_key, key, r, err)

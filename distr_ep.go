@@ -2,7 +2,6 @@ package distr_ep
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -18,9 +17,6 @@ const (
 	CLEANUP_DUR    = time.Second * 10
 	LIST_TTL       = time.Hour * 24
 	SCHEDULE_DUR   = time.Second * 1
-	// https://redis.io/docs/reference/cluster-spec/#hash-tags
-	PK_HASH_PREFIX      = "{dep:%s:pk-}"
-	CACHE_KEY_NODE_HSET = "dep:%s:kn-set"
 )
 
 // Package global - can do better
@@ -110,23 +106,23 @@ func (d *DistributedEventProcessor) validate() error {
 	d.keyMonitor = &keyMonitor{
 		dur:      d.CleanupDur,
 		d:        d,
-		zsetKey:  fmt.Sprintf("dep:%s:mon-zset", d.Namespace),
-		lockName: fmt.Sprintf("dep:%s:mon-zset:lk", d.Namespace),
+		zsetKey:  d.monZsetKeyName(),
+		lockName: d.monZsetLockName(),
 	}
 	d.eventScheduler = &eventScheduler{
 		enabled:  d.Scheduling,
 		dur:      SCHEDULE_DUR,
 		d:        d,
-		zsetKey:  fmt.Sprintf("dep:%s:sch-zset", d.Namespace),
-		lockName: fmt.Sprintf("dep:%s:sch-zset:lk", d.Namespace),
-		hsetKey:  fmt.Sprintf("dep:%s:sch-hset", d.Namespace),
+		zsetKey:  d.schZsetKeyName(),
+		lockName: d.schZsetLockName(),
+		hsetKey:  d.schHashKeyName(),
 	}
 	d.keyProcessor = &keyProcessor{
 		d:             d,
 		activeKeyList: d.processorSetKey(d.consumerId),
 		keyEventsList: d.processorEventsListName(d.consumerId),
 	}
-	d.keyToNodeSetName = fmt.Sprintf(CACHE_KEY_NODE_HSET, d.Namespace)
+	d.keyToNodeSetName = d.keyNodeHashName()
 	return nil
 }
 

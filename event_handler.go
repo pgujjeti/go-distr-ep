@@ -43,7 +43,7 @@ func (d *DistributedEventProcessor) keyEventHandler(ctx context.Context, key str
 	// processing client/thread might have completed message processing loop and
 	// is about to release the key-lock
 	// Obtain EVENT_LOCK to {NS}:proc-lock:{key}, with TTL
-	pl_key := d.processLockForKey(key)
+	pl_key := d.lockNameForKey(key)
 	lock := d.locker.NewMutex(pl_key,
 		redsync.WithExpiry(d.LockTTL),
 		redsync.WithRetryDelay(LOCK_RETRY_DUR),
