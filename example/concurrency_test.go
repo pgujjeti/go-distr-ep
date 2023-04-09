@@ -38,7 +38,7 @@ func TestConcurrent1(t *testing.T) {
 		TimestampFormat: "2006-01-02T15:04:05.999999Z07:00",
 	})
 	log.Info("Running test1")
-	no_clients, no_producers, no_msgs := 8, 1, 10
+	no_clients, no_producers, no_msgs := 8, 100, 10
 	msg_delay := time.Millisecond * 400
 	msg_ch := make(chan *testMsg)
 

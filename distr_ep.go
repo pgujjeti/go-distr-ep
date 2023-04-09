@@ -62,6 +62,9 @@ type DistributedEventProcessor struct {
 
 func (d *DistributedEventProcessor) Init() error {
 	dlog.SetLevel(d.LogLevel)
+	dlog.SetFormatter(&logrus.TextFormatter{
+		TimestampFormat: "2006-01-02T15:04:05.999999Z07:00",
+	})
 	// Init all the resources
 	if err := d.validate(); err != nil {
 		dlog.Warnf("Validation failed %s", err)
