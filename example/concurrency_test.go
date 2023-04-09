@@ -2,7 +2,6 @@ package example
 
 import (
 	"fmt"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -32,14 +31,29 @@ type MsgProducer struct {
 	msg_delay  time.Duration
 }
 
-func TestConcurrent1(t *testing.T) {
+const (
+	EVT_PROC_TIME    = 10 * time.Millisecond
+	EVT_POLL_TIMEOUT = 2000 * time.Millisecond
+	EVT_DELTA        = 10 * time.Millisecond
+)
+
+func TestConcurrentHighThroughput(t *testing.T) {
+	msg_delay := time.Millisecond * 400
+	runConcTest(8, 100, 10, msg_delay, 0)
+}
+
+func TestConcurrentEvtTimeout(t *testing.T) {
+	msg_delay := EVT_POLL_TIMEOUT + EVT_PROC_TIME + EVT_DELTA
+	runConcTest(1, 2, 3, msg_delay, EVT_POLL_TIMEOUT)
+}
+
+func runConcTest(no_clients, no_producers, no_msgs int,
+	msg_delay, evtPollTimeout time.Duration) {
 	log.SetLevel(log.DebugLevel)
 	log.SetFormatter(&log.TextFormatter{
 		TimestampFormat: "2006-01-02T15:04:05.999999Z07:00",
 	})
 	log.Info("Running test1")
-	no_clients, no_producers, no_msgs := 8, 100, 10
-	msg_delay := time.Millisecond * 400
 	msg_ch := make(chan *testMsg)
 
 	cc_list := make([]*ConcClient, 0)
@@ -47,7 +61,7 @@ func TestConcurrent1(t *testing.T) {
 
 	for i := 1; i <= no_clients; i++ {
 		cname := fmt.Sprintf("client %v", i)
-		cc := createConcurrentClient(cname, msg_ch)
+		cc := createConcurrentClient(cname, msg_ch, evtPollTimeout)
 		cc_list = append(cc_list, cc)
 	}
 	for i := 1; i <= no_producers; i++ {
@@ -72,7 +86,8 @@ func TestConcurrent1(t *testing.T) {
 	}
 }
 
-func createConcurrentClient(name string, msg_ch chan *testMsg) (c *ConcClient) {
+func createConcurrentClient(name string, msg_ch chan *testMsg,
+	evtPollTimeout time.Duration) (c *ConcClient) {
 	client := redis.NewClusterClient(&redis.ClusterOptions{
 		Addrs:    []string{"localhost:7000"},
 		PoolSize: 2,
@@ -86,12 +101,15 @@ func createConcurrentClient(name string, msg_ch chan *testMsg) (c *ConcClient) {
 	dep := &distr_ep.DistributedEventProcessor{
 		RedisClient: client,
 		Namespace:   "test1",
-		// LockTTL:     time.Second * 3600,
-		CleanupDur: time.Second * 2,
-		Callback:   c,
-		LogLevel:   log.DebugLevel,
+		LockTTL:     time.Second * 30,
+		CleanupDur:  time.Second * 2,
+		Callback:    c,
+		LogLevel:    log.DebugLevel,
 		// AtLeastOnce: true,
 		Scheduling: true,
+	}
+	if evtPollTimeout > 0 {
+		dep.EventPollTimeout = evtPollTimeout
 	}
 	c.dep = dep
 	if err := dep.Init(); err != nil {
@@ -108,7 +126,7 @@ func (c *ConcClient) ProcessEvent(key string, val interface{}, start bool) bool 
 	}
 	// process event
 	log.Infof("(%s) %s : processing event : %+v", c.name, key, val)
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(EVT_PROC_TIME)
 	// var tm TestMessage
 	// json.Unmarshal([]byte(val.(string)), &tm)
 	// return tm.End
@@ -142,7 +160,8 @@ func (p *MsgProducer) produce() {
 		}
 		log.Infof("%s : adding message to channel: %s", m.key, m.val)
 		p.msg_ch <- m
-		time.Sleep(time.Duration(rand.Intn(20)) * p.msg_delay / 20)
+		// time.Sleep(time.Duration(rand.Intn(20)) * p.msg_delay / 20)
+		time.Sleep(p.msg_delay)
 	}
 }
 
