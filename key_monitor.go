@@ -46,7 +46,7 @@ func (m *keyMonitor) checkinProcessor() {
 	z := &redis.Z{Score: float64(time.Now().UnixMilli()), Member: d.consumerId}
 	if err := d.RedisClient.ZAdd(ctx, m.zsetKey, z).Err(); err != nil {
 		// terminate the processor?
-		dlog.Errorf("%s : could not checkin the processor", d.consumerId)
+		dlog.Errorf("%s : could not check-in the processor", d.consumerId)
 	}
 }
 

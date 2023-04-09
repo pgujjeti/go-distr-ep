@@ -86,7 +86,7 @@ func (d *DistributedEventProcessor) runKeyProcessor(key string,
 			dlog.Infof("%s : context cancelled for key %s: %v", d.consumerId, key, err)
 			break
 		}
-		if err == redis.Nil {
+		if err == redis.Nil || err == errKeyTimedOut || err == errChClosed {
 			dlog.Infof("%s : no items to process for key %s from %s", d.consumerId, key, ln)
 			break
 		}
