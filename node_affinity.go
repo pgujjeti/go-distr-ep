@@ -63,7 +63,7 @@ func (d *DistributedEventProcessor) removeNodeProcessingKey(ctx context.Context,
 }
 
 func (d *DistributedEventProcessor) eventNotifForKey(ctx context.Context, key string) {
-	dlog.Debugf("%s : processing event notification", key)
+	dlog.Debugf("%s : received event notification", key)
 	rec_to := 20 * time.Millisecond
 	kw := d.keyProcessor.getWrapper(key)
 	submit_job := true
